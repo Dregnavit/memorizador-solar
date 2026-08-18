@@ -1,0 +1,32 @@
+/* src/index.css */
+html, body {
+  margin: 0;
+  padding: 0;
+  min-height: 100vh;
+}
+
+#root {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+/* Forzar que el HTML y el Body ocupen toda la pantalla */
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+}
+
+/* El contenedor de Vite también debe estirarse */
+#root {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Obligar a la App (tenga la clase que tenga) a rellenar el espacio sobrante */
+.app-root {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
