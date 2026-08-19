@@ -1,104 +1,25 @@
 import React, { useState, useEffect, useMemo } from "react";
-import { auth } from './firebase';
+import { auth, db } from './firebase'; // Asegúrate de que db esté exportado en tu archivo firebase.js
 import { 
   onAuthStateChanged, 
   signInWithEmailAndPassword, 
   createUserWithEmailAndPassword, 
   signOut 
 } from 'firebase/auth';
-import { db } from './firebase';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import {
   Sun, Moon, BookOpen, Plus, ArrowLeft, Trash2, Layers, Flame, ChevronRight,
   Loader2, Clock, PenLine, ListChecks, Shuffle, Eye, EyeOff,
 } from "lucide-react";
 
-// --- CARGAR DATOS DESDE LA NUBE ---
-  useEffect(() => {
-    const fetchCloudData = async () => {
-      if (user) {
-        // Buscamos el documento en la colección "usuarios" usando el ID de la cuenta
-        const docRef = doc(db, "usuarios", user.uid);
-        const docSnap = await getDoc(docRef);
-
-        if (docSnap.exists()) {
-          // Si el usuario ya tiene textos en la nube, los cargamos en el estado de la app
-          // NOTA: Cambia "setLibrary" o "setTexts" por el nombre real de tu función de estado
-          setLibrary(docSnap.data().textos || []); 
-        } else {
-          // Si es una cuenta nueva, empezamos con la biblioteca vacía
-          setLibrary([]);
-        }
-      }
-    };
-
-    fetchCloudData();
-  }, [user]); // Se ejecuta automáticamente al iniciar sesión
-
-  // --- GUARDAR DATOS EN LA NUBE ---
-  // Reemplaza tu función actual de guardado por esta estructura:
-  const saveLibraryToCloud = async (nuevaBiblioteca) => {
-    // 1. Actualizamos la pantalla de inmediato (cambia setLibrary por tu estado real)
-    setLibrary(nuevaBiblioteca); 
-
-    // 2. Si hay un usuario activo, mandamos la copia a la base de datos
-    if (user) {
-      try {
-        const docRef = doc(db, "usuarios", user.uid);
-        // Sobreescribimos el documento con la versión más reciente
-        await setDoc(docRef, { textos: nuevaBiblioteca });
-      } catch (error) {
-        console.error("Error al guardar en la nube:", error);
-      }
-    }
-  };
-
-/* ---------------- Almacenamiento persistente ---------------- */
-const LIB_KEY = "library";
+/* ---------------- Preferencias Locales ---------------- */
 const THEME_KEY = "theme_preference";
-const textKey = (id) => `text:${id}`;
-const progressKey = (id) => `progress:${id}`;
-const STATS_KEY = "stats";
-
-async function safeGet(key) {
-  try {
-    const r = await window.storage.get(key, false);
-    return r ? r.value : null;
-  } catch { return null; }
+function getSavedTheme() {
+  try { return localStorage.getItem(THEME_KEY); } catch { return null; }
 }
-async function safeSet(key, value) {
-  try { await window.storage.set(key, value, false); } catch (e) { console.error("Error guardando", key, e); }
+function saveThemeLocal(theme) {
+  try { localStorage.setItem(THEME_KEY, theme); } catch (e) { console.error(e); }
 }
-async function safeDelete(key) {
-  try { await window.storage.delete(key, false); } catch {}
-}
-
-async function loadLibrary() {
-  const raw = await safeGet(LIB_KEY);
-  try { return raw ? JSON.parse(raw) : []; } catch { return []; }
-}
-async function saveLibrary(lib) { await safeSet(LIB_KEY, JSON.stringify(lib)); }
-async function loadTextData(id) {
-  const raw = await safeGet(textKey(id));
-  try { return raw ? JSON.parse(raw) : null; } catch { return null; }
-}
-async function saveTextData(id, data) { await safeSet(textKey(id), JSON.stringify(data)); }
-async function loadProgress(id) {
-  const raw = await safeGet(progressKey(id));
-  try { return raw ? JSON.parse(raw) : {}; } catch { return {}; }
-}
-async function saveProgress(id, data) { await safeSet(progressKey(id), JSON.stringify(data)); }
-async function deleteTextEverywhere(id) {
-  await safeDelete(textKey(id));
-  await safeDelete(progressKey(id));
-}
-async function loadStats() {
-  const raw = await safeGet(STATS_KEY);
-  try { return raw ? JSON.parse(raw) : { streak: 0, lastActiveDate: null, totalReviews: 0 }; } catch {
-    return { streak: 0, lastActiveDate: null, totalReviews: 0 };
-  }
-}
-async function saveStats(s) { await safeSet(STATS_KEY, JSON.stringify(s)); }
 
 /* ---------------- Fragmentación de Texto ---------------- */
 function chunkText(raw) {
@@ -306,8 +227,8 @@ function ThemeSelector({ currentTheme, onChangeTheme }) {
         <BookOpen size={15} />
       </button>
       <button className="icon-btn" onClick={() => signOut(auth)} title="Cerrar sesión">
-  <span style={{ fontSize: '12px', fontWeight: 'bold' }}>Salir</span>
-</button>
+        <span style={{ fontSize: '12px', fontWeight: 'bold' }}>Salir</span>
+      </button>
     </div>
   );
 }
@@ -697,25 +618,26 @@ function ExamBody({ text, onDone }) {
 }
 
 /* ============================================================
-   APP PRINCIPAL
+   APP PRINCIPAL (Estado unificado y Sincronizado)
    ============================================================ */
 
 export default function App() {
   const [loading, setLoading] = useState(true);
+  
+  // Estado Global de Datos (Sincronizados en la Nube)
   const [library, setLibrary] = useState([]);
   const [progressMap, setProgressMap] = useState({});
   const [stats, setStats] = useState({ streak: 0, lastActiveDate: null, totalReviews: 0 });
-  const [theme, setTheme] = useState("dark");
+  const [textsData, setTextsData] = useState({}); // Textos completos
 
+  const [theme, setTheme] = useState("dark");
   const [screen, setScreen] = useState("dashboard");
   const [activeTextId, setActiveTextId] = useState(null);
-  const [activeText, setActiveText] = useState(null);
   const [studyTarget, setStudyTarget] = useState(null);
   const [examTarget, setExamTarget] = useState(null);
 
   const [queueList, setQueueList] = useState(null);
   const [queuePos, setQueuePos] = useState(0);
-  const [sessionCache, setSessionCache] = useState({});
   const [sessionResults, setSessionResults] = useState([]);
 
   const [toast, setToast] = useState(null);
@@ -728,15 +650,60 @@ export default function App() {
   const [isLoginView, setIsLoginView] = useState(true);
   const [authError, setAuthError] = useState('');
 
-  // Escuchar si hay una sesión activa al cargar la app
+  // 1. CARGA INICIAL: Autenticación y Descarga desde Firestore
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+    const savedTheme = getSavedTheme();
+    if (savedTheme) setTheme(savedTheme);
+
+    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       setUser(currentUser);
+      if (currentUser) {
+        setLoading(true);
+        try {
+          const docRef = doc(db, "usuarios", currentUser.uid);
+          const docSnap = await getDoc(docRef);
+          if (docSnap.exists()) {
+            const data = docSnap.data();
+            setLibrary(data.library || []);
+            setProgressMap(data.progressMap || {});
+            setStats(data.stats || { streak: 0, lastActiveDate: null, totalReviews: 0 });
+            setTextsData(data.texts || {});
+          } else {
+            // Usuario nuevo, documento en blanco
+            setLibrary([]);
+            setProgressMap({});
+            setStats({ streak: 0, lastActiveDate: null, totalReviews: 0 });
+            setTextsData({});
+          }
+        } catch (error) {
+          console.error("Error cargando de la nube:", error);
+          notify("Error al conectar con la base de datos");
+        }
+        setLoading(false);
+      } else {
+        setLoading(false);
+      }
     });
     return () => unsubscribe();
   }, []);
 
-  // Función para procesar el formulario de ingreso/registro
+  // 2. FUNCIÓN MAESTRA DE GUARDADO EN LA NUBE
+  const syncToCloud = async (newLib, newProg, newStats, newTexts) => {
+    if (!user) return;
+    try {
+      const docRef = doc(db, "usuarios", user.uid);
+      await setDoc(docRef, {
+        library: newLib,
+        progressMap: newProg,
+        stats: newStats,
+        texts: newTexts
+      });
+    } catch (error) {
+      console.error("Error al guardar en Firestore:", error);
+      notify("No se pudo sincronizar a la nube");
+    }
+  };
+
   const handleAuth = async (e) => {
     e.preventDefault();
     setAuthError('');
@@ -751,25 +718,9 @@ export default function App() {
     }
   };
 
-  useEffect(() => { init(); }, []);
-
-  async function init() {
-    setLoading(true);
-    const savedTheme = await safeGet(THEME_KEY);
-    if (savedTheme) setTheme(savedTheme);
-
-    const lib = await loadLibrary();
-    setLibrary(lib);
-    const pm = {};
-    await Promise.all(lib.map(async (item) => { pm[item.id] = await loadProgress(item.id); }));
-    setProgressMap(pm);
-    setStats(await loadStats());
-    setLoading(false);
-  }
-
   function handleThemeChange(newTheme) {
     setTheme(newTheme);
-    safeSet(THEME_KEY, newTheme);
+    saveThemeLocal(newTheme);
   }
 
   function notify(msg) {
@@ -777,69 +728,74 @@ export default function App() {
     setTimeout(() => setToast(null), 2200);
   }
 
-  async function bumpStreak() {
+  function getBumpedStats() {
     const todayStr = new Date().toISOString().slice(0, 10);
     const y = yesterdayStr();
-    setStats((prev) => {
-      let streak;
-      if (prev.lastActiveDate === todayStr) streak = prev.streak || 1;
-      else if (prev.lastActiveDate === y) streak = (prev.streak || 0) + 1;
-      else streak = 1;
-      const ns = { streak, lastActiveDate: todayStr, totalReviews: (prev.totalReviews || 0) + 1 };
-      saveStats(ns);
-      return ns;
-    });
-  }
-
-  async function recordResult(textId, chunkId, quality) {
-    setProgressMap((pm) => {
-      const current = pm[textId] || {};
-      const updated = { ...current, [chunkId]: nextSRS(current[chunkId], quality) };
-      saveProgress(textId, updated);
-      return { ...pm, [textId]: updated };
-    });
-    await bumpStreak();
+    let streak;
+    if (stats.lastActiveDate === todayStr) streak = stats.streak || 1;
+    else if (stats.lastActiveDate === y) streak = (stats.streak || 0) + 1;
+    else streak = 1;
+    return { streak, lastActiveDate: todayStr, totalReviews: (stats.totalReviews || 0) + 1 };
   }
 
   async function handleAddText(title, fullText) {
     const id = "txt_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
     const parts = chunkText(fullText);
     const chunks = parts.map((t, i) => ({ id: `${id}_${i}`, index: i, text: t }));
-    const data = { id, title: title.trim() || "Sin título", fullText: fullText.trim(), chunks, createdAt: new Date().toISOString() };
-    await saveTextData(id, data);
-    const entry = { id, title: data.title, createdAt: data.createdAt, chunkCount: chunks.length, charCount: data.fullText.length };
+    
+    const newTextData = { id, title: title.trim() || "Sin título", fullText: fullText.trim(), chunks, createdAt: new Date().toISOString() };
+    const entry = { id, title: newTextData.title, createdAt: newTextData.createdAt, chunkCount: chunks.length, charCount: newTextData.fullText.length };
+    
+    const newTexts = { ...textsData, [id]: newTextData };
     const newLib = [entry, ...library];
+    const newProg = { ...progressMap, [id]: {} };
+
+    setTextsData(newTexts);
     setLibrary(newLib);
-    await saveLibrary(newLib);
-    setProgressMap((pm) => ({ ...pm, [id]: {} }));
-    await saveProgress(id, {});
-    notify("Texto guardado");
+    setProgressMap(newProg);
+
+    await syncToCloud(newLib, newProg, stats, newTexts);
+    notify("Texto guardado en la nube");
     setScreen("dashboard");
   }
 
-  async function openText(id) {
-    setActiveTextId(id);
-    setActiveText(null);
-    setScreen("detail");
-    setActiveText(await loadTextData(id));
+  async function recordResult(textId, chunkId, quality) {
+    const currentProg = progressMap[textId] || {};
+    const updatedProg = { ...currentProg, [chunkId]: nextSRS(currentProg[chunkId], quality) };
+    const newProgressMap = { ...progressMap, [textId]: updatedProg };
+    
+    const newStats = getBumpedStats();
+
+    setProgressMap(newProgressMap);
+    setStats(newStats);
+
+    await syncToCloud(library, newProgressMap, newStats, textsData);
   }
 
   async function handleDelete(id) {
-    await deleteTextEverywhere(id);
     const newLib = library.filter((l) => l.id !== id);
+    
+    const newProg = { ...progressMap };
+    delete newProg[id];
+    
+    const newTexts = { ...textsData };
+    delete newTexts[id];
+
     setLibrary(newLib);
-    await saveLibrary(newLib);
-    setProgressMap((pm) => { const c = { ...pm }; delete c[id]; return c; });
+    setProgressMap(newProg);
+    setTextsData(newTexts);
+    
+    await syncToCloud(newLib, newProg, stats, newTexts);
+
     setConfirmDeleteId(null);
     if (activeTextId === id) {
       setScreen("dashboard");
       setActiveTextId(null);
-      setActiveText(null);
     }
-    notify("Texto eliminado");
+    notify("Texto eliminado de la nube");
   }
 
-  async function startReviewSession() {
+  function startReviewSession() {
     const dueItems = [];
     for (const item of library) {
       const prog = progressMap[item.id] || {};
@@ -849,21 +805,18 @@ export default function App() {
       }
     }
     if (!dueItems.length) { notify("No hay repasos pendientes"); return; }
-    const shuffled = shuffle(dueItems);
-    const neededIds = [...new Set(shuffled.map((d) => d.textId))];
-    const cache = {};
-    await Promise.all(neededIds.map(async (id) => { cache[id] = await loadTextData(id); }));
-    setSessionCache(cache);
-    setQueueList(shuffled);
+    
+    setQueueList(shuffle(dueItems));
     setQueuePos(0);
     setSessionResults([]);
     setScreen("session");
   }
 
-// --- PANTALLA DE LOGIN ---
+  // --- PANTALLA DE LOGIN ---
   if (!user) {
     return (
       <div className={`app-root theme-${theme}`} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <style>{CSS}</style>
         <div className="text-card" style={{ maxWidth: '400px', width: '100%', padding: '30px' }}>
           <h2 style={{ textAlign: 'center', marginBottom: '20px' }}>
             {isLoginView ? 'Iniciar Sesión' : 'Crear Cuenta'}
@@ -888,7 +841,7 @@ export default function App() {
               required
               style={{ padding: '10px', borderRadius: '8px', border: '1px solid #ccc', background: 'var(--bg)', color: 'var(--text-primary)' }}
             />
-            <button type="submit" className="primary-btn" style={{ padding: '12px', marginTop: '10px' }}>
+            <button type="submit" className="btn btn-primary" style={{ padding: '12px', marginTop: '10px', justifyContent: 'center' }}>
               {isLoginView ? 'Entrar al Memorizador' : 'Registrarme'}
             </button>
           </form>
@@ -904,6 +857,9 @@ export default function App() {
     );
   }
 
+  // --- PANTALLA PRINCIPAL ---
+  const activeText = activeTextId ? textsData[activeTextId] : null;
+
   return (
     <div className={`app-root theme-${theme}`}>
       <style>{CSS}</style>
@@ -912,7 +868,7 @@ export default function App() {
       {loading ? (
         <div className="loading-screen">
           <Loader2 className="spin" size={28} />
-          <p>Cargando datos...</p>
+          <p>Cargando datos de la nube...</p>
         </div>
       ) : (
         <>
@@ -921,7 +877,7 @@ export default function App() {
               library={library}
               progressMap={progressMap}
               stats={stats}
-              onOpen={openText}
+              onOpen={(id) => { setActiveTextId(id); setScreen("detail"); }}
               onAddNew={() => setScreen("add")}
               onStartSession={startReviewSession}
               onRequestDelete={setConfirmDeleteId}
@@ -932,11 +888,11 @@ export default function App() {
 
           {screen === "add" && <AddTextScreen onCancel={() => setScreen("dashboard")} onSave={handleAddText} />}
 
-          {screen === "detail" && (
+          {screen === "detail" && activeText && (
             <TextDetailScreen
               text={activeText}
-              progress={progressMap[activeTextId] || {}}
-              onBack={() => { setScreen("dashboard"); setActiveTextId(null); setActiveText(null); }}
+              progress={progressMap[activeText.id] || {}}
+              onBack={() => { setScreen("dashboard"); setActiveTextId(null); }}
               onStudy={(idx) => { setStudyTarget({ chunkIndex: idx }); setScreen("study"); }}
               onExam={(idx) => { setExamTarget({ chunkIndex: idx }); setScreen("exam"); }}
               onRequestDelete={setConfirmDeleteId}
@@ -970,12 +926,12 @@ export default function App() {
             </div>
           )}
 
-          {screen === "session" && queueList && sessionCache[queueList[queuePos]?.textId] && (
+          {screen === "session" && queueList && textsData[queueList[queuePos]?.textId] && (
             <div className="screen exam-screen">
               <TopNav title={`Repaso · ${queuePos + 1} de ${queueList.length}`} onBack={() => setScreen("dashboard")} />
-              <p className="session-source">{sessionCache[queueList[queuePos].textId].title}</p>
+              <p className="session-source">{textsData[queueList[queuePos].textId].title}</p>
               <ExamBody
-                text={sessionCache[queueList[queuePos].textId].chunks[queueList[queuePos].chunkIndex].text}
+                text={textsData[queueList[queuePos].textId].chunks[queueList[queuePos].chunkIndex].text}
                 onDone={async (q, acc) => {
                   const item = queueList[queuePos];
                   setSessionResults((r) => [...r, { quality: q, accuracy: acc ?? 1 }]);
@@ -1050,6 +1006,7 @@ const CSS = `
   --font-body: 'Sora', sans-serif;
   --font-mono: 'JetBrains Mono', monospace;
   background: radial-gradient(ellipse 120% 80% at 50% -10%, #1a2348 0%, var(--bg) 55%);
+  min-height: 100vh;
 }
 
 /* --- TEMA CLARO --- */
@@ -1072,6 +1029,7 @@ const CSS = `
   --font-body: 'Sora', sans-serif;
   --font-mono: 'JetBrains Mono', monospace;
   background: #F4F6FB;
+  min-height: 100vh;
 }
 
 /* --- TEMA MEDIEVAL CON CLOISTER BLACK --- */
@@ -1096,10 +1054,10 @@ const CSS = `
   background: #EFE5CE;
   background-image: radial-gradient(#5C3D1E 0.4px, transparent 0.4px), radial-gradient(#5C3D1E 0.4px, #EFE5CE 0.4px);
   background-size: 16px 16px;
+  min-height: 100vh;
 }
 
 /* --- FORZADO DE COLOR OSCURO EN TÍTULOS PARA TEMAS CLAROS --- */
-
 .app-root.theme-medieval h1,
 .app-root.theme-medieval h2,
 .app-root.theme-medieval h3,
@@ -1124,7 +1082,7 @@ const CSS = `
 
 .brand-icon-img { width: 38px; height: 38px; object-fit: contain; }
 
-.screen { max-width: 720px; margin: 0 auto; animation: fadeIn 0.35s ease; }
+.screen { max-width: 720px; margin: 0 auto; animation: fadeIn 0.35s ease; padding: 20px;}
 @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
 
 .loading-screen, .loading-inline {
