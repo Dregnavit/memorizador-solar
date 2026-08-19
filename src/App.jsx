@@ -1,4 +1,11 @@
 import React, { useState, useEffect, useMemo } from "react";
+import { auth } from './firebase';
+import { 
+  onAuthStateChanged, 
+  signInWithEmailAndPassword, 
+  createUserWithEmailAndPassword, 
+  signOut 
+} from 'firebase/auth';
 import {
   Sun, Moon, BookOpen, Plus, ArrowLeft, Trash2, Layers, Flame, ChevronRight,
   Loader2, Clock, PenLine, ListChecks, Shuffle, Eye, EyeOff,
@@ -272,6 +279,9 @@ function ThemeSelector({ currentTheme, onChangeTheme }) {
       <button className={`theme-btn ${currentTheme === "medieval" ? "active" : ""}`} onClick={() => onChangeTheme("medieval")} title="Medieval">
         <BookOpen size={15} />
       </button>
+      <button className="icon-btn" onClick={() => signOut(auth)} title="Cerrar sesión">
+  <span style={{ fontSize: '12px', fontWeight: 'bold' }}>Salir</span>
+</button>
     </div>
   );
 }
@@ -685,6 +695,36 @@ export default function App() {
   const [toast, setToast] = useState(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
 
+  // --- ESTADOS DE AUTENTICACIÓN ---
+  const [user, setUser] = useState(null);
+  const [authEmail, setAuthEmail] = useState('');
+  const [authPassword, setAuthPassword] = useState('');
+  const [isLoginView, setIsLoginView] = useState(true);
+  const [authError, setAuthError] = useState('');
+
+  // Escuchar si hay una sesión activa al cargar la app
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      setUser(currentUser);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // Función para procesar el formulario de ingreso/registro
+  const handleAuth = async (e) => {
+    e.preventDefault();
+    setAuthError('');
+    try {
+      if (isLoginView) {
+        await signInWithEmailAndPassword(auth, authEmail, authPassword);
+      } else {
+        await createUserWithEmailAndPassword(auth, authEmail, authPassword);
+      }
+    } catch (error) {
+      setAuthError("Error: Revisa tus datos o la longitud de tu contraseña (mín. 6 caracteres).");
+    }
+  };
+
   useEffect(() => { init(); }, []);
 
   async function init() {
@@ -792,6 +832,50 @@ export default function App() {
     setQueuePos(0);
     setSessionResults([]);
     setScreen("session");
+  }
+
+// --- PANTALLA DE LOGIN ---
+  if (!user) {
+    return (
+      <div className={`app-root theme-${theme}`} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div className="text-card" style={{ maxWidth: '400px', width: '100%', padding: '30px' }}>
+          <h2 style={{ textAlign: 'center', marginBottom: '20px' }}>
+            {isLoginView ? 'Iniciar Sesión' : 'Crear Cuenta'}
+          </h2>
+          
+          {authError && <p style={{ color: '#ef4444', fontSize: '14px', marginBottom: '15px' }}>{authError}</p>}
+          
+          <form onSubmit={handleAuth} style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
+            <input 
+              type="email" 
+              placeholder="Tu correo" 
+              value={authEmail}
+              onChange={(e) => setAuthEmail(e.target.value)}
+              required
+              style={{ padding: '10px', borderRadius: '8px', border: '1px solid #ccc', background: 'var(--bg)', color: 'var(--text-primary)' }}
+            />
+            <input 
+              type="password" 
+              placeholder="Contraseña" 
+              value={authPassword}
+              onChange={(e) => setAuthPassword(e.target.value)}
+              required
+              style={{ padding: '10px', borderRadius: '8px', border: '1px solid #ccc', background: 'var(--bg)', color: 'var(--text-primary)' }}
+            />
+            <button type="submit" className="primary-btn" style={{ padding: '12px', marginTop: '10px' }}>
+              {isLoginView ? 'Entrar al Memorizador' : 'Registrarme'}
+            </button>
+          </form>
+          
+          <button 
+            onClick={() => setIsLoginView(!isLoginView)}
+            style={{ background: 'transparent', border: 'none', color: 'var(--text-secondary)', width: '100%', marginTop: '20px', cursor: 'pointer', textDecoration: 'underline' }}
+          >
+            {isLoginView ? '¿No tienes cuenta? Regístrate aquí' : '¿Ya tienes cuenta? Inicia sesión'}
+          </button>
+        </div>
+      </div>
+    );
   }
 
   return (
