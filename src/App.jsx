@@ -6,26 +6,52 @@ import {
   createUserWithEmailAndPassword, 
   signOut 
 } from 'firebase/auth';
+import { db } from './firebase';
+import { doc, getDoc, setDoc } from 'firebase/firestore';
 import {
   Sun, Moon, BookOpen, Plus, ArrowLeft, Trash2, Layers, Flame, ChevronRight,
   Loader2, Clock, PenLine, ListChecks, Shuffle, Eye, EyeOff,
 } from "lucide-react";
 
-/* ---------------- Polyfill para almacenamiento local ---------------- */
-if (typeof window !== "undefined" && !window.storage) {
-  window.storage = {
-    get: async (key) => {
-      const val = localStorage.getItem(key);
-      return val !== null ? { value: val } : null;
-    },
-    set: async (key, val) => {
-      localStorage.setItem(key, val);
-    },
-    delete: async (key) => {
-      localStorage.removeItem(key);
+// --- CARGAR DATOS DESDE LA NUBE ---
+  useEffect(() => {
+    const fetchCloudData = async () => {
+      if (user) {
+        // Buscamos el documento en la colección "usuarios" usando el ID de la cuenta
+        const docRef = doc(db, "usuarios", user.uid);
+        const docSnap = await getDoc(docRef);
+
+        if (docSnap.exists()) {
+          // Si el usuario ya tiene textos en la nube, los cargamos en el estado de la app
+          // NOTA: Cambia "setLibrary" o "setTexts" por el nombre real de tu función de estado
+          setLibrary(docSnap.data().textos || []); 
+        } else {
+          // Si es una cuenta nueva, empezamos con la biblioteca vacía
+          setLibrary([]);
+        }
+      }
+    };
+
+    fetchCloudData();
+  }, [user]); // Se ejecuta automáticamente al iniciar sesión
+
+  // --- GUARDAR DATOS EN LA NUBE ---
+  // Reemplaza tu función actual de guardado por esta estructura:
+  const saveLibraryToCloud = async (nuevaBiblioteca) => {
+    // 1. Actualizamos la pantalla de inmediato (cambia setLibrary por tu estado real)
+    setLibrary(nuevaBiblioteca); 
+
+    // 2. Si hay un usuario activo, mandamos la copia a la base de datos
+    if (user) {
+      try {
+        const docRef = doc(db, "usuarios", user.uid);
+        // Sobreescribimos el documento con la versión más reciente
+        await setDoc(docRef, { textos: nuevaBiblioteca });
+      } catch (error) {
+        console.error("Error al guardar en la nube:", error);
+      }
     }
   };
-}
 
 /* ---------------- Almacenamiento persistente ---------------- */
 const LIB_KEY = "library";
