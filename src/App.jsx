@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import { auth, db } from './firebase'; // Asegúrate de que db esté exportado en tu archivo firebase.js
 import { 
   onAuthStateChanged, 
@@ -22,34 +22,43 @@ function saveThemeLocal(theme) {
 }
 
 /* ---------------- Fragmentación de Texto ---------------- */
-function chunkText(raw) {
-  const text = raw.trim().replace(/\r\n/g, "\n");
-  const MAX = 320;
-  if (text.length <= MAX + 80) return [text];
+const TEXT_CATEGORIES = {
+  prose: { id: "prose", label: "Texto General (Prosa)", chunkSize: 12 },
+  code: { id: "code", label: "Números / Código (Exactitud)", chunkSize: 4 },
+};
+
+function splitChunkElements(text, category) {
+  if (category === "code") {
+    const lines = text.split(/\n/).map((l) => l.trim()).filter(Boolean);
+    if (lines.length >= 2) return { elements: lines, joiner: "\n" };
+    const tokens = text.split(/\s+/).filter(Boolean);
+    if (tokens.length >= 2) return { elements: tokens, joiner: " " };
+    return { elements: Array.from(text), joiner: "" };
+  }
+
+  const sentences = (text.match(/[^.!?]+[.!?]+[”"')\]]*\s*|[^.!?]+$/g) || [])
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (sentences.length >= 2) return { elements: sentences, joiner: " " };
 
   const paragraphs = text.split(/\n{2,}/).map((p) => p.trim()).filter(Boolean);
+  if (paragraphs.length >= 2) return { elements: paragraphs, joiner: "\n\n" };
+
+  return { elements: text.split(/\s+/).filter(Boolean), joiner: " " };
+}
+
+function chunkText(raw, category = "prose") {
+  const text = raw.trim().replace(/\r\n/g, "\n");
+  const limit = TEXT_CATEGORIES[category]?.chunkSize || TEXT_CATEGORIES.prose.chunkSize;
+  const { elements, joiner } = splitChunkElements(text, category);
+  if (!elements.length) return [text];
+  if (elements.length <= limit) return [text];
+
   const chunks = [];
-
-  const splitParagraph = (para) => {
-    if (para.length <= MAX) {
-      chunks.push(para);
-      return;
-    }
-    const sentences = para.match(/[^.!?]+[.!?]+[”"')\]]*\s*|[^.!?]+$/g) || [para];
-    let current = "";
-    sentences.forEach((s) => {
-      if (current && (current + s).length > MAX) {
-        chunks.push(current.trim());
-        current = s;
-      } else {
-        current += s;
-      }
-    });
-    if (current.trim()) chunks.push(current.trim());
-  };
-
-  paragraphs.forEach(splitParagraph);
-  return chunks.length ? chunks : [text];
+  for (let i = 0; i < elements.length; i += limit) {
+    chunks.push(elements.slice(i, i + limit).join(joiner).trim());
+  }
+  return chunks.filter(Boolean).length ? chunks.filter(Boolean) : [text];
 }
 
 /* ---------------- Algoritmo SRS ---------------- */
@@ -346,7 +355,8 @@ function Dashboard({ library, progressMap, stats, onOpen, onAddNew, onStartSessi
 function AddTextScreen({ onCancel, onSave }) {
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
-  const preview = useMemo(() => (body.trim() ? chunkText(body) : []), [body]);
+  const [category, setCategory] = useState("prose");
+  const preview = useMemo(() => (body.trim() ? chunkText(body, category) : []), [body, category]);
 
   return (
     <div className="screen add-screen">
@@ -354,6 +364,12 @@ function AddTextScreen({ onCancel, onSave }) {
       <div className="form-panel">
         <label className="field-label" htmlFor="title-input">Título</label>
         <input id="title-input" className="text-input" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Ej. Soneto XVII, Neruda" />
+
+        <label className="field-label" htmlFor="category-input">Categoría</label>
+        <select id="category-input" className="text-input" value={category} onChange={(e) => setCategory(e.target.value)}>
+          <option value="prose">{TEXT_CATEGORIES.prose.label}</option>
+          <option value="code">{TEXT_CATEGORIES.code.label}</option>
+        </select>
 
         <label className="field-label" htmlFor="body-input">Texto a memorizar</label>
         <textarea id="body-input" className="text-area-lg" value={body} onChange={(e) => setBody(e.target.value)} placeholder="Pega o escribe aquí el texto..." rows={10} />
@@ -364,7 +380,7 @@ function AddTextScreen({ onCancel, onSave }) {
 
         <div className="form-actions">
           <button className="btn btn-ghost" onClick={onCancel}>Cancelar</button>
-          <button className="btn btn-primary" disabled={!body.trim()} onClick={() => onSave(title, body)}>Guardar texto</button>
+          <button className="btn btn-primary" disabled={!body.trim()} onClick={() => onSave(title, body, category)}>Guardar texto</button>
         </div>
       </div>
     </div>
@@ -465,9 +481,28 @@ function StudyFlow({ chunk, onDone }) {
 
 function ClozeMode({ text, onComplete }) {
   const { tokens, blanks } = useMemo(() => buildCloze(text, 0.3), [text]);
+  const blankOrder = useMemo(() => tokens.map((_, i) => i).filter((i) => blanks.has(i)), [tokens, blanks]);
+  const inputRefs = useRef({});
   const [answers, setAnswers] = useState({});
   const [submitted, setSubmitted] = useState(false);
   const [result, setResult] = useState(null);
+
+  const focusBlank = (fromIndex, direction) => {
+    const pos = blankOrder.indexOf(fromIndex);
+    const next = blankOrder[pos + direction];
+    if (next != null) inputRefs.current[next]?.focus();
+  };
+
+  const handleBlankKeyDown = (e, tokenIndex) => {
+    if (submitted) return;
+    if (e.key === "ArrowRight" || e.key === "ArrowDown") {
+      e.preventDefault();
+      focusBlank(tokenIndex, 1);
+    } else if (e.key === "ArrowLeft" || e.key === "ArrowUp") {
+      e.preventDefault();
+      focusBlank(tokenIndex, -1);
+    }
+  };
 
   const handleSubmit = () => {
     let correct = 0;
@@ -490,6 +525,7 @@ function ClozeMode({ text, onComplete }) {
             return (
               <input
                 key={i}
+                ref={(el) => { if (el) inputRefs.current[i] = el; else delete inputRefs.current[i]; }}
                 className={`cloze-input ${submitted ? (correct ? "is-correct" : "is-wrong") : ""}`}
                 style={{ width: Math.max(3, t.length + 1) + "ch" }}
                 value={answers[i] || ""}
@@ -497,6 +533,7 @@ function ClozeMode({ text, onComplete }) {
                 autoComplete="off"
                 spellCheck="false"
                 onChange={(e) => setAnswers((a) => ({ ...a, [i]: e.target.value }))}
+                onKeyDown={(e) => handleBlankKeyDown(e, i)}
               />
             );
           }
@@ -558,6 +595,15 @@ function ReorderMode({ text, onComplete }) {
   const [answer, setAnswer] = useState([]);
   const [submitted, setSubmitted] = useState(false);
   const [result, setResult] = useState(null);
+  const [focusIdx, setFocusIdx] = useState(0);
+  const chipRefs = useRef([]);
+
+  useEffect(() => {
+    if (submitted || !bank.length) return;
+    const clamped = Math.min(focusIdx, bank.length - 1);
+    if (clamped !== focusIdx) setFocusIdx(clamped);
+    chipRefs.current[clamped]?.focus();
+  }, [bank, focusIdx, submitted]);
 
   const pick = (idx) => {
     if (submitted) return;
@@ -579,6 +625,20 @@ function ReorderMode({ text, onComplete }) {
     setSubmitted(true);
   };
 
+  const handleChipKeyDown = (e, idx) => {
+    if (submitted || !bank.length) return;
+    if (e.key === "ArrowRight" || e.key === "ArrowDown") {
+      e.preventDefault();
+      setFocusIdx((idx + 1) % bank.length);
+    } else if (e.key === "ArrowLeft" || e.key === "ArrowUp") {
+      e.preventDefault();
+      setFocusIdx((idx - 1 + bank.length) % bank.length);
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      pick(idx);
+    }
+  };
+
   return (
     <div className="mode-panel">
       <div className="mode-label"><Shuffle size={16} /> Ordena el texto</div>
@@ -590,8 +650,23 @@ function ReorderMode({ text, onComplete }) {
         })}
       </div>
       {!submitted && (
-        <div className="reorder-bank">
-          {bank.map((w, i) => <button key={i} className="chip chip-bank" onClick={() => pick(i)}>{w}</button>)}
+        <div className="reorder-bank" role="listbox" aria-label="Opciones para ordenar">
+          {bank.map((w, i) => (
+            <button
+              key={i}
+              ref={(el) => { chipRefs.current[i] = el; }}
+              type="button"
+              role="option"
+              aria-selected={i === focusIdx}
+              tabIndex={i === focusIdx ? 0 : -1}
+              className={`chip chip-bank ${i === focusIdx ? "is-focused" : ""}`}
+              onClick={() => pick(i)}
+              onFocus={() => setFocusIdx(i)}
+              onKeyDown={(e) => handleChipKeyDown(e, i)}
+            >
+              {w}
+            </button>
+          ))}
         </div>
       )}
       {!submitted ? (
@@ -738,12 +813,12 @@ export default function App() {
     return { streak, lastActiveDate: todayStr, totalReviews: (stats.totalReviews || 0) + 1 };
   }
 
-  async function handleAddText(title, fullText) {
+  async function handleAddText(title, fullText, category = "prose") {
     const id = "txt_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
-    const parts = chunkText(fullText);
+    const parts = chunkText(fullText, category);
     const chunks = parts.map((t, i) => ({ id: `${id}_${i}`, index: i, text: t }));
     
-    const newTextData = { id, title: title.trim() || "Sin título", fullText: fullText.trim(), chunks, createdAt: new Date().toISOString() };
+    const newTextData = { id, title: title.trim() || "Sin título", fullText: fullText.trim(), category, chunks, createdAt: new Date().toISOString() };
     const entry = { id, title: newTextData.title, createdAt: newTextData.createdAt, chunkCount: chunks.length, charCount: newTextData.fullText.length };
     
     const newTexts = { ...textsData, [id]: newTextData };
@@ -1178,6 +1253,7 @@ const CSS = `
   background: var(--bg-panel); border: 1px solid var(--border); color: var(--text-primary);
   border-radius: 12px; padding: 12px 14px; font-family: var(--font-body); font-size: 14.5px; outline: none;
 }
+select.text-input { cursor: pointer; appearance: auto; }
 .text-area-lg { line-height: 1.6; font-family: var(--font-display); font-size: 17px; }
 .chunk-preview { display: flex; align-items: center; gap: 6px; color: var(--sun-dawn); font-size: 13px; font-family: var(--font-mono); }
 .form-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 22px; }
@@ -1232,6 +1308,11 @@ const CSS = `
 }
 .reorder-bank { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 18px; }
 .chip { font-family: var(--font-body); font-size: 14px; padding: 7px 13px; border-radius: 999px; border: 1px solid var(--border); background: var(--bg-panel); color: var(--text-primary) !important; cursor: pointer; }
+.chip-bank.is-focused, .chip-bank:focus {
+  border-color: var(--sun-dawn);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--sun-dawn) 45%, transparent);
+  outline: none;
+}
 .chip-answer.is-correct { border-color: #16A34A; color: #16A34A !important; }
 .chip-answer.is-wrong { border-color: #DC2626; color: #DC2626 !important; }
 
