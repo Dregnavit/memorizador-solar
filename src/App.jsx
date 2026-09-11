@@ -1,89 +1,95 @@
-import React, { useState, useEffect } from 'react';
-import { onAuthStateChanged } from 'firebase/auth';
-import { doc, getDoc, setDoc } from 'firebase/firestore';
-import { auth, db } from './firebase';
+import { useState, useEffect } from "react";
+import { auth, db } from "./firebase";
+import { onAuthStateChanged, signInWithPopup, GoogleAuthProvider, signOut } from "firebase/auth";
+import { collection, query, onSnapshot, addDoc, doc, writeBatch, serverTimestamp } from "firebase/firestore";
 
-import { getSavedTheme, saveThemeLocal, nextSRS, chunkText } from './utils';
-import { ThemeSelector } from './components/SharedUI';
-import Dashboard from './components/Dashboard';
-import TextDetailScreen from './components/TextDetailScreen';
-import StudyFlow from './components/StudyFlow';
-
-import './App.css';
+// Componentes
+import Dashboard from "./components/Dashboard";
+import TextDetailScreen from "./components/TextDetailScreen";
+import StudyFlow from "./components/StudyFlow";
+import ThemeSelector from "./components/ThemeSelector";
+import "./App.css";
 
 export default function App() {
-  const [theme, setTheme] = useState(getSavedTheme() || "medieval");
-  const [currentScreen, setCurrentScreen] = useState("dashboard"); // dashboard, detail, study
   const [user, setUser] = useState(null);
-  
-  // Estado global de datos
+  const [theme, setTheme] = useState("medieval");
   const [textsData, setTextsData] = useState([]);
   const [progressMap, setProgressMap] = useState({});
   const [activeText, setActiveText] = useState(null);
-  const [studyMode, setStudyMode] = useState("all"); 
+  const [currentScreen, setCurrentScreen] = useState("dashboard");
   const [studyChunks, setStudyChunks] = useState([]);
+  const [loadingAuth, setLoadingAuth] = useState(true);
 
-  // Aplicar tema CSS
+  // 1. Autenticación
   useEffect(() => {
-    document.body.className = `theme-${theme}`;
-    saveThemeLocal(theme);
-  }, [theme]);
-
-  // Autenticación y carga desde Firebase
-  useEffect(() => {
-    const unsub = onAuthStateChanged(auth, async (u) => {
-      setUser(u);
-      if (u) {
-        const docRef = doc(db, "users", u.uid);
-        const snap = await getDoc(docRef);
-        if (snap.exists()) {
-          const d = snap.data();
-          setTextsData(d.textsData || []);
-          setProgressMap(d.progressMap || {});
-        }
-      }
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      setUser(currentUser);
+      setLoadingAuth(false);
     });
-    return () => unsub();
+    return () => unsubscribe();
   }, []);
 
-  const syncToCloud = async (newTexts, newProg) => {
+  // 2. Cargar Textos
+  useEffect(() => {
     if (!user) return;
-    try {
-      await setDoc(doc(db, "users", user.uid), { textsData: newTexts, progressMap: newProg }, { merge: true });
-    } catch (e) {
-      console.error("Error sincronizando:", e);
+    const q = query(collection(db, `users/${user.uid}/texts`));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const texts = [];
+      snapshot.forEach((doc) => texts.push({ id: doc.id, ...doc.data() }));
+      setTextsData(texts);
+    });
+    return () => unsubscribe();
+  }, [user]);
+
+  // 3. Cargar Progreso del Texto Activo
+  useEffect(() => {
+    if (!user || !activeText) return;
+    const q = query(collection(db, `users/${user.uid}/texts/${activeText.id}/progress`));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const pMap = {};
+      snapshot.forEach((doc) => {
+        pMap[doc.id] = doc.data();
+      });
+      setProgressMap(pMap);
+    });
+    return () => unsubscribe();
+  }, [user, activeText]);
+
+  // 4. Agregar Texto
+  const handleAddText = async (newTextObj) => {
+    if (!user) return;
+    await addDoc(collection(db, `users/${user.uid}/texts`), {
+      ...newTextObj,
+      createdAt: serverTimestamp()
+    });
+  };
+
+  // 5. Iniciar Estudio
+  const startStudy = (mode) => {
+    if (!activeText || !activeText.chunks) return;
+    let targets = [];
+    if (mode === "all") {
+      targets = activeText.chunks;
+    } else {
+      const now = Date.now();
+      targets = activeText.chunks.filter(c => {
+        const p = progressMap[c.id];
+        return !p || !p.nextReview <= now;
+      });
     }
+    setStudyChunks(targets);
+    setCurrentScreen("study");
   };
 
-  const handleAddText = (title, content, category) => {
-    // Para preparar el Método Ícaro, ahora los chunks se guardarán como objetos, no solo strings
-    const rawChunks = chunkText(content, category);
-    const chunksAsObjects = rawChunks.map(txt => ({
-      text: txt,
-      keywords: [],
-      agentImage: "",
-      palaceLoci: ""
-    }));
-
-    const newText = { id: Date.now().toString(), title, chunks: chunksAsObjects, chunkCount: rawChunks.length, category };
-    const updated = [newText, ...textsData];
-    setTextsData(updated);
-    syncToCloud(updated, progressMap);
-  };
-
+  // 6. Guardar Progreso y Método Ícaro en Firebase
   const handleStudyDone = async (results) => {
-    // results recibe el array desde StudyFlow: [{ chunkId, rating, icaro: {...} }]
     const updatedProgress = { ...progressMap };
-    
-    // Importa writeBatch y doc de firebase/firestore arriba si no los tienes
-    const { writeBatch, doc } = await import('firebase/firestore');
-    const batch = writeBatch(db); 
+    const batch = writeBatch(db);
 
     for (const res of results) {
       const { chunkId, rating, icaro } = res;
       const current = updatedProgress[chunkId] || { interval: 0, ease: 2.5, nextReview: Date.now() };
 
-      // Algoritmo de Repaso Espaciado Básico
       let { interval, ease } = current;
       if (rating === "again") {
         interval = 0;
@@ -99,17 +105,9 @@ export default function App() {
       }
 
       const nextReview = Date.now() + interval * 24 * 60 * 60 * 1000;
-      
-      const newProgressData = {
-        interval,
-        ease,
-        nextReview,
-        icaro // Aquí inyectamos la data del Método Ícaro a la base de datos
-      };
+      const newProgressData = { interval, ease, nextReview, icaro };
 
       updatedProgress[chunkId] = newProgressData;
-
-      // Actualizamos el documento en Firestore
       const chunkRef = doc(db, `users/${user.uid}/texts/${activeText.id}/progress/${chunkId}`);
       batch.set(chunkRef, newProgressData, { merge: true });
     }
@@ -119,39 +117,73 @@ export default function App() {
     setCurrentScreen("detail");
   };
 
-  const startStudy = (mode) => {
-    setStudyMode(mode);
-    let targetList = [];
-    if (mode === "due") {
-      targetList = activeText.chunks
-        .map((c, idx) => ({ ...c, originalIndex: idx }))
-        .filter(c => {
-          const p = progressMap[`${activeText.id}_${c.originalIndex}`];
-          return !p || new Date(p.nextReview) <= new Date();
-        });
-    } else {
-      targetList = activeText.chunks.map((c, idx) => ({ ...c, originalIndex: idx }));
-    }
-    setStudyChunks(targetList);
-    setCurrentScreen("study");
-  };
+  // Renderizados condicionales (Cargando y Login)
+  if (loadingAuth) {
+    return <div className="loading-screen"><div className="spin">⚙</div></div>;
+  }
 
-  if (!user) return <div style={{padding: '2rem'}}>Cargando o no autenticado...</div>;
+  if (!user) {
+    return (
+      <div className="app-root theme-medieval" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div className="screen" style={{ textAlign: 'center' }}>
+          <h1 style={{ fontFamily: 'var(--font-display)', color: 'var(--text-primary)', marginBottom: '20px' }}>Memorizador Solar</h1>
+          <button className="btn btn-primary" onClick={() => signInWithPopup(auth, new GoogleAuthProvider())}>
+            Iniciar sesión con Google
+          </button>
+        </div>
+      </div>
+    );
+  }
 
+  // Renderizado Principal con Clases CSS Restauradas
   return (
-    <div className="app-container">
-      {currentScreen === "dashboard" && (
-        <>
-          <ThemeSelector currentTheme={theme} onChangeTheme={setTheme} />
-          <Dashboard textsData={textsData} progressMap={progressMap} onSelectText={t => { setActiveText(t); setCurrentScreen("detail"); }} onAddText={handleAddText} />
-        </>
-      )}
-      {currentScreen === "detail" && activeText && (
-        <TextDetailScreen textItem={activeText} progressMap={progressMap} onBack={() => { setActiveText(null); setCurrentScreen("dashboard"); }} onStudy={() => startStudy("all")} onExam={() => startStudy("due")} />
-      )}
-      {currentScreen === "study" && activeText && studyChunks.length > 0 && (
-        <StudyFlow textItem={activeText} targetChunks={studyChunks} onDone={handleStudyDone} onBack={() => setCurrentScreen("detail")} />
-      )}
+    <div className={`app-root theme-${theme}`}>
+      <div className="screen">
+        <div className="app-header">
+          <div className="brand">
+            <div>
+              <h1>Memorizador Solar</h1>
+              <p className="tagline">Método Ícaro Integrado</p>
+            </div>
+          </div>
+          <div className="header-right">
+            {currentScreen === "dashboard" && (
+              <ThemeSelector currentTheme={theme} onChangeTheme={setTheme} />
+            )}
+            <button className="btn btn-ghost btn-sm" onClick={() => { signOut(auth); setUser(null); }}>
+              Salir
+            </button>
+          </div>
+        </div>
+
+        {currentScreen === "dashboard" && (
+          <Dashboard
+            textsData={textsData}
+            progressMap={progressMap}
+            onSelectText={t => { setActiveText(t); setCurrentScreen("detail"); }}
+            onAddText={handleAddText}
+          />
+        )}
+        
+        {currentScreen === "detail" && activeText && (
+          <TextDetailScreen
+            textItem={activeText}
+            progressMap={progressMap}
+            onBack={() => { setActiveText(null); setCurrentScreen("dashboard"); }}
+            onStudy={() => startStudy("all")}
+            onExam={() => startStudy("due")}
+          />
+        )}
+        
+        {currentScreen === "study" && activeText && studyChunks.length > 0 && (
+          <StudyFlow
+            textItem={activeText}
+            targetChunks={studyChunks}
+            onDone={handleStudyDone}
+            onBack={() => setCurrentScreen("detail")}
+          />
+        )}
+      </div>
     </div>
   );
 }
