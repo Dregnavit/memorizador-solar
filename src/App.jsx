@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { auth, db } from "./firebase";
 import { onAuthStateChanged, signInWithPopup, GoogleAuthProvider, signOut } from "firebase/auth";
-import { collection, query, onSnapshot, addDoc, doc, writeBatch, serverTimestamp, where } from "firebase/firestore";
+import { collection, query, onSnapshot, addDoc, doc, writeBatch, serverTimestamp } from "firebase/firestore";
 
 // Componentes
 import Dashboard from "./components/Dashboard";
@@ -28,27 +28,26 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
-  // 2. Cargar Textos (Ruta corregida a la colección principal)
+  // 2. Cargar Textos (Ruta original restaurada)
   useEffect(() => {
     if (!user) return;
-    const q = query(collection(db, "texts"), where("userId", "==", user.uid));
-    
+    const q = query(collection(db, `users/${user.uid}/texts`));
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const texts = [];
-      snapshot.forEach((document) => texts.push({ id: document.id, ...document.data() }));
+      snapshot.forEach((doc) => texts.push({ id: doc.id, ...doc.data() }));
       setTextsData(texts);
     });
     return () => unsubscribe();
   }, [user]);
 
-  // 3. Cargar Progreso del Texto Activo
+  // 3. Cargar Progreso del Texto Activo (Ruta original restaurada)
   useEffect(() => {
     if (!user || !activeText) return;
-    const q = query(collection(db, `texts/${activeText.id}/progress`));
+    const q = query(collection(db, `users/${user.uid}/texts/${activeText.id}/progress`));
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const pMap = {};
-      snapshot.forEach((document) => {
-        pMap[document.id] = document.data();
+      snapshot.forEach((doc) => {
+        pMap[doc.id] = doc.data();
       });
       setProgressMap(pMap);
     });
@@ -58,9 +57,8 @@ export default function App() {
   // 4. Agregar Texto
   const handleAddText = async (newTextObj) => {
     if (!user) return;
-    await addDoc(collection(db, "texts"), {
+    await addDoc(collection(db, `users/${user.uid}/texts`), {
       ...newTextObj,
-      userId: user.uid,
       createdAt: serverTimestamp()
     });
   };
@@ -109,7 +107,7 @@ export default function App() {
       const newProgressData = { interval, ease, nextReview, icaro };
 
       updatedProgress[chunkId] = newProgressData;
-      const chunkRef = doc(db, `texts/${activeText.id}/progress/${chunkId}`);
+      const chunkRef = doc(db, `users/${user.uid}/texts/${activeText.id}/progress/${chunkId}`);
       batch.set(chunkRef, newProgressData, { merge: true });
     }
 
@@ -145,24 +143,13 @@ export default function App() {
               <p className="tagline">Método Ícaro Integrado</p>
             </div>
           </div>
-          <div className="header-right">
+          <div className="header-right" style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
             {currentScreen === "dashboard" && (
-              <select 
-                value={theme} 
-                onChange={(e) => setTheme(e.target.value)}
-                style={{ 
-                  marginRight: '15px', 
-                  padding: '6px 12px', 
-                  borderRadius: '6px', 
-                  background: 'var(--surface)', 
-                  color: 'var(--text-primary)', 
-                  border: '1px solid var(--border)' 
-                }}
-              >
-                <option value="medieval">Medieval</option>
-                <option value="light">Claro</option>
-                <option value="dark">Oscuro</option>
-              </select>
+              <div style={{ display: 'flex', gap: '4px' }}>
+                <button className={`btn btn-sm ${theme === 'medieval' ? 'btn-primary' : 'btn-ghost'}`} onClick={() => setTheme('medieval')}>Medieval</button>
+                <button className={`btn btn-sm ${theme === 'light' ? 'btn-primary' : 'btn-ghost'}`} onClick={() => setTheme('light')}>Claro</button>
+                <button className={`btn btn-sm ${theme === 'dark' ? 'btn-primary' : 'btn-ghost'}`} onClick={() => setTheme('dark')}>Oscuro</button>
+              </div>
             )}
             <button className="btn btn-ghost btn-sm" onClick={() => { signOut(auth); setUser(null); }}>
               Salir
