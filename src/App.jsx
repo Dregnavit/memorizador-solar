@@ -7,12 +7,11 @@ import { collection, query, onSnapshot, addDoc, doc, writeBatch, serverTimestamp
 import Dashboard from "./components/Dashboard";
 import TextDetailScreen from "./components/TextDetailScreen";
 import StudyFlow from "./components/StudyFlow";
-import ThemeSelector from "./components/ThemeSelector";
 import "./App.css";
 
 export default function App() {
   const [user, setUser] = useState(null);
-  const [theme, setTheme] = useState("medieval");
+  const [theme, setTheme] = useState("medieval"); // Mantiene el tema medieval por defecto
   const [textsData, setTextsData] = useState([]);
   const [progressMap, setProgressMap] = useState({});
   const [activeText, setActiveText] = useState(null);
@@ -135,7 +134,7 @@ export default function App() {
     );
   }
 
-  // Renderizado Principal con Clases CSS Restauradas
+  // Renderizado Principal
   return (
     <div className={`app-root theme-${theme}`}>
       <div className="screen">
@@ -147,9 +146,6 @@ export default function App() {
             </div>
           </div>
           <div className="header-right">
-            {currentScreen === "dashboard" && (
-              <ThemeSelector currentTheme={theme} onChangeTheme={setTheme} />
-            )}
             <button className="btn btn-ghost btn-sm" onClick={() => { signOut(auth); setUser(null); }}>
               Salir
             </button>
