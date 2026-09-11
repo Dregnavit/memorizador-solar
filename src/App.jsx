@@ -71,14 +71,51 @@ export default function App() {
     syncToCloud(updated, progressMap);
   };
 
-  const handleStudyDone = (results) => {
-    const newProg = { ...progressMap };
-    results.forEach(res => {
-      const cid = `${activeText.id}_${res.chunkIndex}`;
-      newProg[cid] = nextSRS(newProg[cid], res.quality);
-    });
-    setProgressMap(newProg);
-    syncToCloud(textsData, newProg);
+  const handleStudyDone = async (results) => {
+    // results recibe el array desde StudyFlow: [{ chunkId, rating, icaro: {...} }]
+    const updatedProgress = { ...progressMap };
+    
+    // Importa writeBatch y doc de firebase/firestore arriba si no los tienes
+    const { writeBatch, doc } = await import('firebase/firestore');
+    const batch = writeBatch(db); 
+
+    for (const res of results) {
+      const { chunkId, rating, icaro } = res;
+      const current = updatedProgress[chunkId] || { interval: 0, ease: 2.5, nextReview: Date.now() };
+
+      // Algoritmo de Repaso Espaciado Básico
+      let { interval, ease } = current;
+      if (rating === "again") {
+        interval = 0;
+        ease = Math.max(1.3, ease - 0.2);
+      } else if (rating === "hard") {
+        interval = Math.max(1, interval * 1.2);
+        ease = Math.max(1.3, ease - 0.15);
+      } else if (rating === "good") {
+        interval = interval === 0 ? 1 : interval * 2.5;
+      } else if (rating === "easy") {
+        interval = interval === 0 ? 4 : interval * ease * 1.3;
+        ease += 0.15;
+      }
+
+      const nextReview = Date.now() + interval * 24 * 60 * 60 * 1000;
+      
+      const newProgressData = {
+        interval,
+        ease,
+        nextReview,
+        icaro // Aquí inyectamos la data del Método Ícaro a la base de datos
+      };
+
+      updatedProgress[chunkId] = newProgressData;
+
+      // Actualizamos el documento en Firestore
+      const chunkRef = doc(db, `users/${user.uid}/texts/${activeText.id}/progress/${chunkId}`);
+      batch.set(chunkRef, newProgressData, { merge: true });
+    }
+
+    await batch.commit();
+    setProgressMap(updatedProgress);
     setCurrentScreen("detail");
   };
 
