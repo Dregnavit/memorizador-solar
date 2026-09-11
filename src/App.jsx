@@ -16,101 +16,49 @@ export default function App() {
   const [activeText, setActiveText] = useState(null);
   const [currentScreen, setCurrentScreen] = useState("dashboard");
   const [studyChunks, setStudyChunks] = useState([]);
-  const [loadingAuth, setLoadingAuth] = useState(true);
 
-  // 1. Autenticación
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-      setUser(currentUser);
-      setLoadingAuth(false);
-    });
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => setUser(currentUser));
     return () => unsubscribe();
   }, []);
 
-  // 2. Cargar Textos (Ruta original: users/UID/texts)
+  // CORRECCIÓN: Apuntando a la colección raíz "texts" (tu base de datos original)
   useEffect(() => {
     if (!user) return;
-    const q = query(collection(db, `users/${user.uid}/texts`));
+    const q = query(collection(db, "texts")); 
     
     const unsubscribe = onSnapshot(q, 
       (snapshot) => {
         const texts = [];
-        snapshot.forEach((document) => texts.push({ id: document.id, ...document.data() }));
+        snapshot.forEach((document) => {
+          // Filtramos en el cliente por si acaso la colección es compartida
+          if (document.data().userId === user.uid || !document.data().userId) {
+            texts.push({ id: document.id, ...document.data() });
+          }
+        });
         setTextsData(texts);
       },
-      (error) => console.error("Error al cargar Firebase:", error)
+      (error) => console.error("Error cargando textos:", error)
     );
     return () => unsubscribe();
   }, [user]);
 
-  // 3. Cargar Progreso
-  useEffect(() => {
-    if (!user || !activeText) return;
-    const q = query(collection(db, `users/${user.uid}/texts/${activeText.id}/progress`));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const pMap = {};
-      snapshot.forEach((document) => { pMap[document.id] = document.data(); });
-      setProgressMap(pMap);
-    });
-    return () => unsubscribe();
-  }, [user, activeText]);
-
   const handleAddText = async (newTextObj) => {
     if (!user) return;
-    await addDoc(collection(db, `users/${user.uid}/texts`), {
+    await addDoc(collection(db, "texts"), {
       ...newTextObj,
+      userId: user.uid,
       createdAt: serverTimestamp()
     });
   };
 
-  const startStudy = (mode) => {
-    if (!activeText || !activeText.chunks) return;
-    let targets = mode === "all" 
-      ? activeText.chunks 
-      : activeText.chunks.filter(c => !progressMap[c.id] || progressMap[c.id].nextReview <= Date.now());
-    
-    setStudyChunks(targets);
-    setCurrentScreen("study");
-  };
-
-  const handleStudyDone = async (results) => {
-    const updatedProgress = { ...progressMap };
-    const batch = writeBatch(db);
-
-    for (const res of results) {
-      const { chunkId, rating, icaro } = res;
-      const current = updatedProgress[chunkId] || { interval: 0, ease: 2.5, nextReview: Date.now() };
-      let { interval, ease } = current;
-
-      if (rating === "again") { interval = 0; ease = Math.max(1.3, ease - 0.2); } 
-      else if (rating === "hard") { interval = Math.max(1, interval * 1.2); ease = Math.max(1.3, ease - 0.15); } 
-      else if (rating === "good") { interval = interval === 0 ? 1 : interval * 2.5; } 
-      else if (rating === "easy") { interval = interval === 0 ? 4 : interval * ease * 1.3; ease += 0.15; }
-
-      const nextReview = Date.now() + interval * 24 * 60 * 60 * 1000;
-      const newProgressData = { interval, ease, nextReview, icaro };
-
-      updatedProgress[chunkId] = newProgressData;
-      const chunkRef = doc(db, `users/${user.uid}/texts/${activeText.id}/progress/${chunkId}`);
-      batch.set(chunkRef, newProgressData, { merge: true });
-    }
-
-    await batch.commit();
-    setProgressMap(updatedProgress);
-    setCurrentScreen("detail");
-  };
-
-  if (loadingAuth) return <div className="screen">Cargando...</div>;
-
   if (!user) {
     return (
-      <div className="app-root theme-medieval" style={{ justifyContent: 'center', alignItems: 'center' }}>
-        <div className="screen" style={{ textAlign: 'center' }}>
-          <img src="/solmedieval1.png" alt="Sol" style={{ width: '80px', marginBottom: '1rem', borderRadius: '12px' }} />
-          <h1 style={{ fontFamily: 'var(--font-title)', fontSize: '3rem', marginBottom: '2rem' }}>Memorizador Solar</h1>
-          <button onClick={() => signInWithPopup(auth, new GoogleAuthProvider())}>
-            Iniciar sesión con Google
-          </button>
+      <div className="app-root theme-medieval" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+        <div style={{ textAlign: 'center' }}>
+          <img src="/solmedieval1.png" alt="Sol" style={{ width: '80px', marginBottom: '1rem', borderRadius: '8px' }} />
+          <h1 style={{ fontFamily: 'CloisterBlack, serif', fontSize: '3rem', color: '#8B0000', marginBottom: '2rem' }}>Memorizador Solar</h1>
+          <button onClick={() => signInWithPopup(auth, new GoogleAuthProvider())}>Iniciar sesión con Google</button>
         </div>
       </div>
     );
@@ -122,8 +70,8 @@ export default function App() {
         <header className="app-header">
           <div className="brand-group">
             <img src="/solmedieval1.png" alt="Icono Sol" className="app-icon" />
-            <div className="brand-text">
-              <h1>Memorizador Solar</h1>
+            <div>
+              <h1 className="header-title">Memorizador Solar</h1>
               <p className="tagline">Método Ícaro Integrado</p>
             </div>
           </div>
@@ -131,28 +79,20 @@ export default function App() {
           <div className="theme-tabs">
             {currentScreen === "dashboard" && (
               <>
-                {['medieval', 'light', 'dark'].map(t => (
-                  <button 
-                    key={t}
-                    className={`theme-tab ${theme === t ? 'active' : ''}`}
-                    onClick={() => setTheme(t)}
-                  >
-                    {t.charAt(0).toUpperCase() + t.slice(1)}
-                  </button>
-                ))}
+                <button className={`theme-tab ${theme === 'medieval' ? 'active' : ''}`} onClick={() => setTheme('medieval')}>Medieval</button>
+                <button className={`theme-tab ${theme === 'light' ? 'active' : ''}`} onClick={() => setTheme('light')}>Light</button>
+                <button className={`theme-tab ${theme === 'dark' ? 'active' : ''}`} onClick={() => setTheme('dark')}>Dark</button>
               </>
             )}
-            <button className="theme-tab" onClick={() => { signOut(auth); setUser(null); }}>
-              Salir
-            </button>
+            <button className="theme-tab" onClick={() => signOut(auth)}>Salir</button>
           </div>
         </header>
 
         {currentScreen === "dashboard" && (
           <Dashboard 
-            texts={textsData}        /* Inyección doble para asegurar compatibilidad */
+            texts={textsData} 
+            data={textsData} 
             textsData={textsData} 
-            progressMap={progressMap} 
             onSelectText={t => { setActiveText(t); setCurrentScreen("detail"); }} 
             onAddText={handleAddText} 
           />
@@ -163,17 +103,6 @@ export default function App() {
             textItem={activeText} 
             progressMap={progressMap} 
             onBack={() => { setActiveText(null); setCurrentScreen("dashboard"); }} 
-            onStudy={() => startStudy("all")} 
-            onExam={() => startStudy("due")} 
-          />
-        )}
-        
-        {currentScreen === "study" && activeText && studyChunks.length > 0 && (
-          <StudyFlow 
-            textItem={activeText} 
-            targetChunks={studyChunks} 
-            onDone={handleStudyDone} 
-            onBack={() => setCurrentScreen("detail")} 
           />
         )}
       </div>
