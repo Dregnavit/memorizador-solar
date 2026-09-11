@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { auth, db } from "./firebase";
 import { onAuthStateChanged, signInWithPopup, GoogleAuthProvider, signOut } from "firebase/auth";
-import { collection, query, onSnapshot, addDoc, doc, writeBatch, serverTimestamp, where } from "firebase/firestore";
+import { collection, query, onSnapshot, addDoc, doc, writeBatch, serverTimestamp } from "firebase/firestore";
 
 import Dashboard from "./components/Dashboard";
 import TextDetailScreen from "./components/TextDetailScreen";
@@ -27,10 +27,10 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
-  // 2. Cargar Textos (Buscando en la colección raíz por tu UID)
+  // 2. Cargar Textos (Ruta original: users/UID/texts)
   useEffect(() => {
     if (!user) return;
-    const q = query(collection(db, "texts"), where("userId", "==", user.uid));
+    const q = query(collection(db, `users/${user.uid}/texts`));
     
     const unsubscribe = onSnapshot(q, 
       (snapshot) => {
@@ -38,15 +38,15 @@ export default function App() {
         snapshot.forEach((document) => texts.push({ id: document.id, ...document.data() }));
         setTextsData(texts);
       },
-      (error) => console.error("Error cargando textos:", error)
+      (error) => console.error("Error al cargar Firebase:", error)
     );
     return () => unsubscribe();
   }, [user]);
 
-  // 3. Cargar Progreso del Texto Activo
+  // 3. Cargar Progreso
   useEffect(() => {
     if (!user || !activeText) return;
-    const q = query(collection(db, `texts/${activeText.id}/progress`));
+    const q = query(collection(db, `users/${user.uid}/texts/${activeText.id}/progress`));
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const pMap = {};
       snapshot.forEach((document) => { pMap[document.id] = document.data(); });
@@ -55,17 +55,14 @@ export default function App() {
     return () => unsubscribe();
   }, [user, activeText]);
 
-  // 4. Agregar Texto
   const handleAddText = async (newTextObj) => {
     if (!user) return;
-    await addDoc(collection(db, "texts"), {
+    await addDoc(collection(db, `users/${user.uid}/texts`), {
       ...newTextObj,
-      userId: user.uid,
       createdAt: serverTimestamp()
     });
   };
 
-  // 5. Iniciar Estudio
   const startStudy = (mode) => {
     if (!activeText || !activeText.chunks) return;
     let targets = mode === "all" 
@@ -76,7 +73,6 @@ export default function App() {
     setCurrentScreen("study");
   };
 
-  // 6. Guardar Progreso
   const handleStudyDone = async (results) => {
     const updatedProgress = { ...progressMap };
     const batch = writeBatch(db);
@@ -95,7 +91,7 @@ export default function App() {
       const newProgressData = { interval, ease, nextReview, icaro };
 
       updatedProgress[chunkId] = newProgressData;
-      const chunkRef = doc(db, `texts/${activeText.id}/progress/${chunkId}`);
+      const chunkRef = doc(db, `users/${user.uid}/texts/${activeText.id}/progress/${chunkId}`);
       batch.set(chunkRef, newProgressData, { merge: true });
     }
 
@@ -110,8 +106,9 @@ export default function App() {
     return (
       <div className="app-root theme-medieval" style={{ justifyContent: 'center', alignItems: 'center' }}>
         <div className="screen" style={{ textAlign: 'center' }}>
-          <h1 style={{ fontSize: '2.5rem', marginBottom: '2rem' }}>Memorizador Solar</h1>
-          <button className="btn btn-primary" onClick={() => signInWithPopup(auth, new GoogleAuthProvider())}>
+          <img src="/solmedieval1.png" alt="Sol" style={{ width: '80px', marginBottom: '1rem', borderRadius: '12px' }} />
+          <h1 style={{ fontFamily: 'var(--font-title)', fontSize: '3rem', marginBottom: '2rem' }}>Memorizador Solar</h1>
+          <button onClick={() => signInWithPopup(auth, new GoogleAuthProvider())}>
             Iniciar sesión con Google
           </button>
         </div>
@@ -123,14 +120,17 @@ export default function App() {
     <div className={`app-root theme-${theme}`}>
       <div className="screen">
         <header className="app-header">
-          <div className="brand">
-            <h1>Memorizador Solar</h1>
-            <p className="tagline">Método Ícaro Integrado</p>
+          <div className="brand-group">
+            <img src="/solmedieval1.png" alt="Icono Sol" className="app-icon" />
+            <div className="brand-text">
+              <h1>Memorizador Solar</h1>
+              <p className="tagline">Método Ícaro Integrado</p>
+            </div>
           </div>
           
-          <div className="header-right" style={{ display: 'flex', alignItems: 'center', gap: '2rem' }}>
+          <div className="theme-tabs">
             {currentScreen === "dashboard" && (
-              <div className="theme-tabs">
+              <>
                 {['medieval', 'light', 'dark'].map(t => (
                   <button 
                     key={t}
@@ -140,24 +140,41 @@ export default function App() {
                     {t.charAt(0).toUpperCase() + t.slice(1)}
                   </button>
                 ))}
-              </div>
+              </>
             )}
-            <button className="btn btn-ghost" onClick={() => { signOut(auth); setUser(null); }}>
+            <button className="theme-tab" onClick={() => { signOut(auth); setUser(null); }}>
               Salir
             </button>
           </div>
         </header>
 
         {currentScreen === "dashboard" && (
-          <Dashboard textsData={textsData} progressMap={progressMap} onSelectText={t => { setActiveText(t); setCurrentScreen("detail"); }} onAddText={handleAddText} />
+          <Dashboard 
+            texts={textsData}        /* Inyección doble para asegurar compatibilidad */
+            textsData={textsData} 
+            progressMap={progressMap} 
+            onSelectText={t => { setActiveText(t); setCurrentScreen("detail"); }} 
+            onAddText={handleAddText} 
+          />
         )}
         
         {currentScreen === "detail" && activeText && (
-          <TextDetailScreen textItem={activeText} progressMap={progressMap} onBack={() => { setActiveText(null); setCurrentScreen("dashboard"); }} onStudy={() => startStudy("all")} onExam={() => startStudy("due")} />
+          <TextDetailScreen 
+            textItem={activeText} 
+            progressMap={progressMap} 
+            onBack={() => { setActiveText(null); setCurrentScreen("dashboard"); }} 
+            onStudy={() => startStudy("all")} 
+            onExam={() => startStudy("due")} 
+          />
         )}
         
         {currentScreen === "study" && activeText && studyChunks.length > 0 && (
-          <StudyFlow textItem={activeText} targetChunks={studyChunks} onDone={handleStudyDone} onBack={() => setCurrentScreen("detail")} />
+          <StudyFlow 
+            textItem={activeText} 
+            targetChunks={studyChunks} 
+            onDone={handleStudyDone} 
+            onBack={() => setCurrentScreen("detail")} 
+          />
         )}
       </div>
     </div>

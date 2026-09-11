@@ -1,50 +1,68 @@
-/* Variables maestras de tema */
-.theme-light {
-  --bg-color: #f9fafb;
-  --surface: #ffffff;
-  --text-main: #111827;
-  --text-muted: #6b7280;
-  --accent: #0f172a;
-  --accent-text: #ffffff;
-  --border: #e5e7eb;
-  --font-base: 'Inter', system-ui, sans-serif;
-  --font-display: 'Inter', system-ui, sans-serif;
+/* Importación de tu fuente personalizada */
+@font-face {
+  font-family: 'CloisterBlack';
+  src: url('/cloisterblack.ttf') format('truetype'); /* Asegúrate de que el archivo .ttf esté en la carpeta public/ */
+  font-weight: normal;
+  font-style: normal;
 }
 
-.theme-dark {
-  --bg-color: #0f172a;
-  --surface: #1e293b;
-  --text-main: #f8fafc;
-  --text-muted: #94a3b8;
-  --accent: #38bdf8;
-  --accent-text: #0f172a;
-  --border: #334155;
-  --font-base: 'Inter', system-ui, sans-serif;
-  --font-display: 'Inter', system-ui, sans-serif;
+/* Variables maestras - Inspiradas en UI orgánica y redondeada */
+:root {
+  --radius-xl: 32px;
+  --radius-lg: 24px;
+  --radius-md: 16px;
+  --radius-sm: 12px;
+  --shadow-soft: 0 10px 30px -10px rgba(0,0,0,0.05);
+  --font-body: 'Inter', system-ui, sans-serif;
 }
 
 .theme-medieval {
-  --bg-color: #f4ecd8;
-  --surface: #e8ddc3;
-  --text-main: #2c1e16;
-  --text-muted: #5c4738;
-  --accent: #7a1010;
-  --accent-text: #ffffff;
-  --border: #d4c4a8;
-  --font-base: 'Georgia', serif;
-  --font-display: 'Playfair Display', 'Georgia', serif;
+  --bg-color: #F6F3ED; /* Pergamino muy suave */
+  --surface: #EAE3D6; /* Tarjetas ligeramente contrastadas */
+  --text-main: #31231B;
+  --text-muted: #7A6556;
+  --accent: #8C3A3A; /* Carmesí medieval apagado */
+  --accent-text: #FFF;
+  --border: transparent;
+  --font-title: 'CloisterBlack', serif;
+  --title-tracking: normal;
 }
 
-/* Reseteo Global Austero */
+.theme-light {
+  --bg-color: #F1F5F9;
+  --surface: #FFFFFF;
+  --text-main: #0F172A;
+  --text-muted: #64748B;
+  --accent: #334155;
+  --accent-text: #FFFFFF;
+  --border: transparent;
+  --font-title: 'Inter', system-ui, sans-serif;
+  --title-tracking: -0.03em;
+}
+
+.theme-dark {
+  --bg-color: #0B1120;
+  --surface: #172033;
+  --text-main: #F8FAFC;
+  --text-muted: #94A3B8;
+  --accent: #38BDF8;
+  --accent-text: #0B1120;
+  --border: transparent;
+  --font-title: 'Inter', system-ui, sans-serif;
+  --title-tracking: -0.03em;
+}
+
+/* Reseteo Global */
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
 body, html {
   width: 100%;
-  height: 100%;
+  min-height: 100vh;
   background-color: var(--bg-color);
   color: var(--text-main);
-  font-family: var(--font-base);
-  transition: background-color 0.3s ease, color 0.3s ease;
+  font-family: var(--font-body);
+  transition: background-color 0.4s ease, color 0.4s ease;
+  -webkit-font-smoothing: antialiased;
 }
 
 .app-root {
@@ -54,41 +72,60 @@ body, html {
 }
 
 .screen {
-  max-width: 900px;
+  max-width: 800px; /* Más estrecho y elegante */
   margin: 0 auto;
-  padding: 2rem;
+  padding: 3rem 1.5rem;
   width: 100%;
 }
 
-/* Cabecera Pulida */
+/* Cabecera Principal */
 .app-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding-bottom: 2rem;
+  padding-bottom: 2.5rem;
   margin-bottom: 2rem;
-  border-bottom: 1px solid var(--border);
 }
 
-.brand h1 {
-  font-family: var(--font-display);
-  font-size: 1.5rem;
-  font-weight: 700;
+.brand-group {
+  display: flex;
+  align-items: center;
+  gap: 1.2rem;
+}
+
+.app-icon {
+  width: 54px;
+  height: 54px;
+  border-radius: var(--radius-sm);
+  object-fit: contain;
+}
+
+.brand-text h1 {
+  font-family: var(--font-title);
+  font-size: 2.2rem;
   color: var(--text-main);
-  letter-spacing: -0.02em;
+  letter-spacing: var(--title-tracking);
+  line-height: 1.1;
+  font-weight: normal;
 }
 
 .tagline {
   font-size: 0.85rem;
   color: var(--text-muted);
   font-style: italic;
-  margin-top: 0.25rem;
+  margin-top: 0.2rem;
 }
 
-/* Selector de Temas Elegante (Sin botones toscos) */
+/* Ocultar el H1/H2 duplicado dentro de Dashboard */
+.screen > div > h1:first-child,
+.screen > div > h2:first-child {
+  display: none !important;
+}
+
+/* Selector de Temas Elegante (Texto sin cajas) */
 .theme-tabs {
   display: flex;
-  gap: 1.5rem;
+  gap: 1.2rem;
   align-items: center;
 }
 
@@ -96,80 +133,79 @@ body, html {
   background: none;
   border: none;
   color: var(--text-muted);
-  font-family: var(--font-base);
-  font-size: 0.9rem;
+  font-family: var(--font-body);
+  font-size: 0.95rem;
   cursor: pointer;
-  padding: 0.25rem 0;
-  border-bottom: 2px solid transparent;
-  transition: all 0.2s ease;
+  padding: 0;
+  transition: all 0.3s ease;
 }
 
-.theme-tab:hover {
-  color: var(--text-main);
-}
+.theme-tab:hover { color: var(--text-main); }
+.theme-tab.active { color: var(--text-main); font-weight: 600; }
 
-.theme-tab.active {
-  color: var(--text-main);
-  border-bottom-color: var(--accent);
-  font-weight: 600;
-}
-
-/* Botones Profesionales */
-.btn {
-  font-family: var(--font-base);
-  padding: 0.6rem 1.2rem;
-  border-radius: 6px;
-  font-size: 0.9rem;
+/* 
+  REPARACIÓN DE BOTONES GLOBALES
+  Esto atrapa al botón "Nuevo Texto" de tu Dashboard y lo hace ver moderno
+*/
+button, .btn {
+  appearance: none;
+  font-family: var(--font-body);
+  padding: 0.8rem 1.6rem;
+  border-radius: var(--radius-xl); /* Botones tipo píldora */
+  font-size: 0.95rem;
   font-weight: 500;
   cursor: pointer;
   border: none;
-  transition: all 0.2s ease;
+  background-color: var(--surface);
+  color: var(--text-main);
+  box-shadow: var(--shadow-soft);
+  transition: all 0.3s ease;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
 }
 
-.btn-primary {
+button:hover, .btn:hover {
+  transform: translateY(-2px);
   background-color: var(--accent);
   color: var(--accent-text);
-  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-}
-
-.btn-primary:hover {
-  opacity: 0.9;
-  transform: translateY(-1px);
 }
 
 .btn-ghost {
   background: transparent;
+  box-shadow: none;
   color: var(--text-muted);
-  border: 1px solid var(--border);
 }
-
 .btn-ghost:hover {
   background: var(--surface);
   color: var(--text-main);
 }
 
-/* Cajas y Formularios */
-.text-input, .text-area-lg {
+/* Estilo para Cajas, Listas y Formularios (Diseño Tarjeta) */
+input, textarea, .text-input, .text-area-lg {
   width: 100%;
-  padding: 0.8rem;
-  border-radius: 6px;
-  border: 1px solid var(--border);
+  padding: 1.2rem;
+  border-radius: var(--radius-lg);
+  border: none;
   background: var(--surface);
   color: var(--text-main);
-  font-family: var(--font-base);
-  margin-bottom: 1rem;
+  font-family: var(--font-body);
+  margin-bottom: 1.5rem;
+  box-shadow: inset 0 2px 4px rgba(0,0,0,0.02);
 }
 
-.text-input:focus, .text-area-lg:focus {
-  outline: none;
-  border-color: var(--accent);
+input:focus, textarea:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
-.dashed-box {
-  border: 1px dashed var(--border);
-  border-radius: 8px;
-  padding: 3rem;
-  text-align: center;
-  color: var(--text-muted);
+/* Si tu Dashboard usa divs para los textos, los estilizamos como tarjetas suaves */
+.dashboard-item, .card, li {
   background: var(--surface);
+  border-radius: var(--radius-lg);
+  padding: 1.5rem;
+  margin-bottom: 1rem;
+  list-style: none;
+  box-shadow: var(--shadow-soft);
 }
