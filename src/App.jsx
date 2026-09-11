@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { auth, db } from "./firebase";
 import { onAuthStateChanged, signInWithPopup, GoogleAuthProvider, signOut } from "firebase/auth";
-import { collection, query, onSnapshot, addDoc, doc, writeBatch, serverTimestamp } from "firebase/firestore";
+import { collection, query, onSnapshot, addDoc, doc, writeBatch, serverTimestamp, where } from "firebase/firestore";
 
 // Componentes
 import Dashboard from "./components/Dashboard";
@@ -11,7 +11,7 @@ import "./App.css";
 
 export default function App() {
   const [user, setUser] = useState(null);
-  const [theme, setTheme] = useState("medieval"); // Mantiene el tema medieval por defecto
+  const [theme, setTheme] = useState("medieval");
   const [textsData, setTextsData] = useState([]);
   const [progressMap, setProgressMap] = useState({});
   const [activeText, setActiveText] = useState(null);
@@ -28,13 +28,14 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
-  // 2. Cargar Textos
+  // 2. Cargar Textos (Ruta corregida a la colección principal)
   useEffect(() => {
     if (!user) return;
-    const q = query(collection(db, `users/${user.uid}/texts`));
+    const q = query(collection(db, "texts"), where("userId", "==", user.uid));
+    
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const texts = [];
-      snapshot.forEach((doc) => texts.push({ id: doc.id, ...doc.data() }));
+      snapshot.forEach((document) => texts.push({ id: document.id, ...document.data() }));
       setTextsData(texts);
     });
     return () => unsubscribe();
@@ -43,11 +44,11 @@ export default function App() {
   // 3. Cargar Progreso del Texto Activo
   useEffect(() => {
     if (!user || !activeText) return;
-    const q = query(collection(db, `users/${user.uid}/texts/${activeText.id}/progress`));
+    const q = query(collection(db, `texts/${activeText.id}/progress`));
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const pMap = {};
-      snapshot.forEach((doc) => {
-        pMap[doc.id] = doc.data();
+      snapshot.forEach((document) => {
+        pMap[document.id] = document.data();
       });
       setProgressMap(pMap);
     });
@@ -57,8 +58,9 @@ export default function App() {
   // 4. Agregar Texto
   const handleAddText = async (newTextObj) => {
     if (!user) return;
-    await addDoc(collection(db, `users/${user.uid}/texts`), {
+    await addDoc(collection(db, "texts"), {
       ...newTextObj,
+      userId: user.uid,
       createdAt: serverTimestamp()
     });
   };
@@ -107,7 +109,7 @@ export default function App() {
       const newProgressData = { interval, ease, nextReview, icaro };
 
       updatedProgress[chunkId] = newProgressData;
-      const chunkRef = doc(db, `users/${user.uid}/texts/${activeText.id}/progress/${chunkId}`);
+      const chunkRef = doc(db, `texts/${activeText.id}/progress/${chunkId}`);
       batch.set(chunkRef, newProgressData, { merge: true });
     }
 
@@ -116,7 +118,6 @@ export default function App() {
     setCurrentScreen("detail");
   };
 
-  // Renderizados condicionales (Cargando y Login)
   if (loadingAuth) {
     return <div className="loading-screen"><div className="spin">⚙</div></div>;
   }
@@ -134,7 +135,6 @@ export default function App() {
     );
   }
 
-  // Renderizado Principal
   return (
     <div className={`app-root theme-${theme}`}>
       <div className="screen">
@@ -146,6 +146,24 @@ export default function App() {
             </div>
           </div>
           <div className="header-right">
+            {currentScreen === "dashboard" && (
+              <select 
+                value={theme} 
+                onChange={(e) => setTheme(e.target.value)}
+                style={{ 
+                  marginRight: '15px', 
+                  padding: '6px 12px', 
+                  borderRadius: '6px', 
+                  background: 'var(--surface)', 
+                  color: 'var(--text-primary)', 
+                  border: '1px solid var(--border)' 
+                }}
+              >
+                <option value="medieval">Medieval</option>
+                <option value="light">Claro</option>
+                <option value="dark">Oscuro</option>
+              </select>
+            )}
             <button className="btn btn-ghost btn-sm" onClick={() => { signOut(auth); setUser(null); }}>
               Salir
             </button>
