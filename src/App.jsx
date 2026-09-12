@@ -13,6 +13,34 @@ import TextDetailScreen from "./components/TextDetailScreen";
 import StudyFlow from "./components/StudyFlow";
 import "./App.css";
 
+// Función normalizadora: Garantiza títulos, vistas previas y fragmentos para textos viejos y nuevos
+function normalizeText(data, id) {
+  const title = data.title || data.titulo || data.name || "Texto sin título";
+  const rawText = data.rawText || data.content || data.texto || data.text || data.body || "";
+  
+  let chunks = Array.isArray(data.chunks) && data.chunks.length > 0 
+    ? data.chunks 
+    : (Array.isArray(data.fragmentos) && data.fragmentos.length > 0 ? data.fragmentos : []);
+
+  // Si el texto en Firestore no tiene fragmentos, los genera dinámicamente por oraciones/líneas
+  if (chunks.length === 0 && rawText) {
+    const lines = rawText.split(/(?<=[.!?])\s+|\n+/).map(l => l.trim()).filter(Boolean);
+    chunks = lines.map((line, idx) => ({
+      id: `chunk_auto_${idx}`,
+      text: line,
+      order: idx
+    }));
+  }
+
+  return {
+    ...data,
+    id: id || data.id,
+    title,
+    rawText,
+    chunks
+  };
+}
+
 export default function App() {
   const [user, setUser] = useState(null);
   const [theme, setTheme] = useState("medieval");
@@ -33,7 +61,7 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
-  // 2. Carga de Textos
+  // 2. Carga y Normalización de Textos
   useEffect(() => {
     if (!user) return;
     const q = query(collection(db, "texts")); 
@@ -44,23 +72,22 @@ export default function App() {
         snapshot.forEach((document) => {
           const data = document.data();
           if (data.userId === user.uid || !data.userId) {
-            // Se asegura de que title y chunks siempre existan para evitar crasheos
-            texts.push({ 
-              id: document.id, 
-              title: data.title || "Texto sin título",
-              chunks: data.chunks || [],
-              ...data 
-            });
+            texts.push(normalizeText(data, document.id));
           }
         });
         setTextsData(texts);
+
+        if (activeText) {
+          const updatedActive = texts.find(t => t.id === activeText.id);
+          if (updatedActive) setActiveText(updatedActive);
+        }
       },
       (error) => console.error("Error cargando textos:", error)
     );
     return () => unsubscribe();
   }, [user]);
 
-  // 3. Carga de Progreso (solo cuando hay un texto activo)
+  // 3. Carga de Progreso
   useEffect(() => {
     if (!user || !activeText) return;
     const q = query(collection(db, `texts/${activeText.id}/progress`));
@@ -84,28 +111,31 @@ export default function App() {
       setEmail("");
       setPassword("");
     } catch (error) {
-      setAuthError("Error: Verifica tus credenciales o contraseña (mínimo 6 caracteres).");
+      setAuthError("Error: Verifica tus credenciales.");
     }
   };
 
   const handleAddText = async (newTextObj) => {
     if (!user) return;
-    // Si el componente Dashboard no genera chunks, le forzamos un arreglo vacío
-    const safeTextObj = {
-      ...newTextObj,
-      chunks: newTextObj.chunks || [],
+    const normalized = normalizeText(newTextObj);
+    const docData = {
+      title: normalized.title,
+      rawText: normalized.rawText,
+      type: normalized.type || "prosa",
+      chunks: normalized.chunks,
       userId: user.uid,
       createdAt: serverTimestamp()
     };
-    await addDoc(collection(db, "texts"), safeTextObj);
+    await addDoc(collection(db, "texts"), docData);
   };
 
-  // 4. Lógica de Estudio Restaurada y Blindada
+  // 4. Modo Estudio y Examen
   const startStudy = (mode) => {
-    // Si el texto es viejo y no tiene fragmentos, evita el colapso y frena la ejecución
-    const chunks = activeText?.chunks || [];
+    if (!activeText) return;
+    const chunks = activeText.chunks || [];
+    
     if (chunks.length === 0) {
-      alert("Este texto no tiene fragmentos compatibles con el nuevo método.");
+      alert("Este texto no contiene fragmentos válidos para estudiar.");
       return;
     }
     
@@ -113,6 +143,10 @@ export default function App() {
       ? chunks 
       : chunks.filter(c => !progressMap[c.id] || progressMap[c.id].nextReview <= Date.now());
     
+    if (targets.length === 0 && mode === "due") {
+      targets = chunks; // Si no hay pendientes en el examen, repasa todos los fragmentos
+    }
+
     setStudyChunks(targets);
     setCurrentScreen("study");
   };
@@ -149,7 +183,9 @@ export default function App() {
       <div className="app-root theme-medieval" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
         <div className="dashboard-item" style={{ maxWidth: '400px', width: '100%', textAlign: 'center', margin: '2rem' }}>
           <img src="/solmedieval1.png" alt="Sol" style={{ width: '80px', marginBottom: '1rem', borderRadius: '12px' }} />
-          <h1 className="header-title" style={{ marginBottom: '1.5rem', fontSize: '2.5rem' }}>Memorizador Solar</h1>
+          <h1 className="header-title" style={{ marginBottom: '1.5rem', fontSize: '2.5rem', fontFamily: 'CloisterBlack, serif' }}>
+            Memorizador Solar
+          </h1>
           
           <form onSubmit={handleAuth} style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
             <input type="email" placeholder="Correo electrónico" value={email} onChange={(e) => setEmail(e.target.value)} required />
@@ -176,7 +212,7 @@ export default function App() {
           <div className="brand-group">
             <img src="/solmedieval1.png" alt="Icono Sol" className="app-icon" />
             <div>
-              <h1 className="header-title">Memorizador Solar</h1>
+              <h1 className="header-title" style={{ fontFamily: 'CloisterBlack, serif' }}>Memorizador Solar</h1>
               <p className="tagline">Método Ícaro Integrado</p>
             </div>
           </div>
@@ -196,8 +232,6 @@ export default function App() {
         {currentScreen === "dashboard" && (
           <Dashboard 
             texts={textsData} 
-            data={textsData} 
-            textsData={textsData} 
             onSelectText={t => { setActiveText(t); setCurrentScreen("detail"); }} 
             onAddText={handleAddText} 
           />
