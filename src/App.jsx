@@ -1,7 +1,12 @@
 import { useState, useEffect } from "react";
 import { auth, db } from "./firebase";
-import { onAuthStateChanged, signInWithPopup, GoogleAuthProvider, signOut } from "firebase/auth";
-import { collection, query, onSnapshot, addDoc, doc, writeBatch, serverTimestamp } from "firebase/firestore";
+import { 
+  onAuthStateChanged, 
+  signInWithEmailAndPassword, 
+  createUserWithEmailAndPassword, 
+  signOut 
+} from "firebase/auth";
+import { collection, query, onSnapshot, addDoc, serverTimestamp } from "firebase/firestore";
 
 import Dashboard from "./components/Dashboard";
 import TextDetailScreen from "./components/TextDetailScreen";
@@ -15,14 +20,18 @@ export default function App() {
   const [progressMap, setProgressMap] = useState({});
   const [activeText, setActiveText] = useState(null);
   const [currentScreen, setCurrentScreen] = useState("dashboard");
-  const [studyChunks, setStudyChunks] = useState([]);
+  
+  // Estados para tu sistema de acceso por correo
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [isLogin, setIsLogin] = useState(true);
+  const [authError, setAuthError] = useState("");
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => setUser(currentUser));
     return () => unsubscribe();
   }, []);
 
-  // CORRECCIÓN: Apuntando a la colección raíz "texts" (tu base de datos original)
   useEffect(() => {
     if (!user) return;
     const q = query(collection(db, "texts")); 
@@ -31,7 +40,6 @@ export default function App() {
       (snapshot) => {
         const texts = [];
         snapshot.forEach((document) => {
-          // Filtramos en el cliente por si acaso la colección es compartida
           if (document.data().userId === user.uid || !document.data().userId) {
             texts.push({ id: document.id, ...document.data() });
           }
@@ -43,6 +51,22 @@ export default function App() {
     return () => unsubscribe();
   }, [user]);
 
+  const handleAuth = async (e) => {
+    e.preventDefault();
+    setAuthError("");
+    try {
+      if (isLogin) {
+        await signInWithEmailAndPassword(auth, email, password);
+      } else {
+        await createUserWithEmailAndPassword(auth, email, password);
+      }
+      setEmail("");
+      setPassword("");
+    } catch (error) {
+      setAuthError("Error: Verifica tus credenciales o contraseña (mínimo 6 caracteres).");
+    }
+  };
+
   const handleAddText = async (newTextObj) => {
     if (!user) return;
     await addDoc(collection(db, "texts"), {
@@ -52,13 +76,51 @@ export default function App() {
     });
   };
 
+  // PANTALLA DE INICIO DE SESIÓN RESTAURADA
   if (!user) {
     return (
       <div className="app-root theme-medieval" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
-        <div style={{ textAlign: 'center' }}>
-          <img src="/solmedieval1.png" alt="Sol" style={{ width: '80px', marginBottom: '1rem', borderRadius: '8px' }} />
-          <h1 style={{ fontFamily: 'CloisterBlack, serif', fontSize: '3rem', color: '#8B0000', marginBottom: '2rem' }}>Memorizador Solar</h1>
-          <button onClick={() => signInWithPopup(auth, new GoogleAuthProvider())}>Iniciar sesión con Google</button>
+        <div className="dashboard-item" style={{ maxWidth: '400px', width: '100%', textAlign: 'center', margin: '2rem' }}>
+          <img src="/solmedieval1.png" alt="Sol" style={{ width: '80px', marginBottom: '1rem', borderRadius: '12px' }} />
+          
+          {/* Se añade la clase header-title para que CSS no lo oculte y aplique CloisterBlack */}
+          <h1 className="header-title" style={{ marginBottom: '1.5rem', fontSize: '2.5rem' }}>
+            Memorizador Solar
+          </h1>
+          
+          <form onSubmit={handleAuth} style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+            <input 
+              type="email" 
+              placeholder="Correo electrónico" 
+              value={email} 
+              onChange={(e) => setEmail(e.target.value)} 
+              required 
+              style={{ marginBottom: '0' }}
+            />
+            <input 
+              type="password" 
+              placeholder="Contraseña" 
+              value={password} 
+              onChange={(e) => setPassword(e.target.value)} 
+              required 
+              style={{ marginBottom: '10px' }}
+            />
+            {authError && <p style={{ color: 'var(--accent)', fontSize: '0.9rem', margin: '0 0 10px 0' }}>{authError}</p>}
+            
+            <button type="submit" style={{ width: '100%' }}>
+              {isLogin ? "Entrar" : "Crear Cuenta"}
+            </button>
+          </form>
+
+          <p style={{ marginTop: '1.5rem', fontSize: '0.9rem', color: 'var(--text-muted)' }}>
+            {isLogin ? "¿No tienes cuenta? " : "¿Ya tienes cuenta? "}
+            <span 
+              onClick={() => { setIsLogin(!isLogin); setAuthError(""); }} 
+              style={{ color: 'var(--accent)', cursor: 'pointer', fontWeight: 'bold', textDecoration: 'underline' }}
+            >
+              {isLogin ? "Regístrate aquí" : "Inicia sesión"}
+            </span>
+          </p>
         </div>
       </div>
     );
