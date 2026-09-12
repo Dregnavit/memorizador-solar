@@ -13,18 +13,19 @@ import TextDetailScreen from "./components/TextDetailScreen";
 import StudyFlow from "./components/StudyFlow";
 import "./App.css";
 
-// Función normalizadora: Garantiza títulos, vistas previas y fragmentos para textos viejos y nuevos
 function normalizeText(data, id) {
+  if (!data) return { id, title: "Texto sin título", rawText: "", chunks: [] };
+  
   const title = data.title || data.titulo || data.name || "Texto sin título";
   const rawText = data.rawText || data.content || data.texto || data.text || data.body || "";
   
-  let chunks = Array.isArray(data.chunks) && data.chunks.length > 0 
-    ? data.chunks 
-    : (Array.isArray(data.fragmentos) && data.fragmentos.length > 0 ? data.fragmentos : []);
+  let chunks = [];
+  if (Array.isArray(data.chunks)) chunks = data.chunks;
+  else if (Array.isArray(data.fragmentos)) chunks = data.fragmentos;
+  else if (Array.isArray(data.items)) chunks = data.items;
 
-  // Si el texto en Firestore no tiene fragmentos, los genera dinámicamente por oraciones/líneas
   if (chunks.length === 0 && rawText) {
-    const lines = rawText.split(/(?<=[.!?])\s+|\n+/).map(l => l.trim()).filter(Boolean);
+    const lines = String(rawText).split(/(?<=[.!?])\s+|\n+/).map(l => l.trim()).filter(Boolean);
     chunks = lines.map((line, idx) => ({
       id: `chunk_auto_${idx}`,
       text: line,
@@ -37,7 +38,7 @@ function normalizeText(data, id) {
     id: id || data.id,
     title,
     rawText,
-    chunks
+    chunks: Array.isArray(chunks) ? chunks : []
   };
 }
 
@@ -55,13 +56,11 @@ export default function App() {
   const [isLogin, setIsLogin] = useState(true);
   const [authError, setAuthError] = useState("");
 
-  // 1. Autenticación
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => setUser(currentUser));
     return () => unsubscribe();
   }, []);
 
-  // 2. Carga y Normalización de Textos
   useEffect(() => {
     if (!user) return;
     const q = query(collection(db, "texts")); 
@@ -87,7 +86,6 @@ export default function App() {
     return () => unsubscribe();
   }, [user]);
 
-  // 3. Carga de Progreso
   useEffect(() => {
     if (!user || !activeText) return;
     const q = query(collection(db, `texts/${activeText.id}/progress`));
@@ -111,7 +109,7 @@ export default function App() {
       setEmail("");
       setPassword("");
     } catch (error) {
-      setAuthError("Error: Verifica tus credenciales.");
+      setAuthError("Verifica tus credenciales de acceso.");
     }
   };
 
@@ -129,22 +127,21 @@ export default function App() {
     await addDoc(collection(db, "texts"), docData);
   };
 
-  // 4. Modo Estudio y Examen
   const startStudy = (mode) => {
     if (!activeText) return;
-    const chunks = activeText.chunks || [];
+    const chunks = Array.isArray(activeText.chunks) ? activeText.chunks : [];
     
     if (chunks.length === 0) {
-      alert("Este texto no contiene fragmentos válidos para estudiar.");
+      alert("Este texto no contiene fragmentos para estudiar.");
       return;
     }
     
     let targets = mode === "all" 
       ? chunks 
-      : chunks.filter(c => !progressMap[c.id] || progressMap[c.id].nextReview <= Date.now());
+      : chunks.filter(c => !progressMap[c.id] || (progressMap[c.id]?.nextReview || 0) <= Date.now());
     
     if (targets.length === 0 && mode === "due") {
-      targets = chunks; // Si no hay pendientes en el examen, repasa todos los fragmentos
+      targets = chunks;
     }
 
     setStudyChunks(targets);
@@ -152,11 +149,16 @@ export default function App() {
   };
 
   const handleStudyDone = async (results) => {
+    if (!Array.isArray(results) || !activeText) {
+      setCurrentScreen("detail");
+      return;
+    }
+
     const updatedProgress = { ...progressMap };
     const batch = writeBatch(db);
 
     for (const res of results) {
-      const { chunkId, rating, icaro } = res;
+      const { chunkId, rating } = res;
       const current = updatedProgress[chunkId] || { interval: 0, ease: 2.5, nextReview: Date.now() };
       let { interval, ease } = current;
 
@@ -166,7 +168,7 @@ export default function App() {
       else if (rating === "easy") { interval = interval === 0 ? 4 : interval * ease * 1.3; ease += 0.15; }
 
       const nextReview = Date.now() + interval * 24 * 60 * 60 * 1000;
-      const newProgressData = { interval, ease, nextReview, icaro };
+      const newProgressData = { interval, ease, nextReview };
 
       updatedProgress[chunkId] = newProgressData;
       const chunkRef = doc(db, `texts/${activeText.id}/progress/${chunkId}`);
@@ -180,7 +182,7 @@ export default function App() {
 
   if (!user) {
     return (
-      <div className="app-root theme-medieval" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+      <div className="app-root theme-medieval" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '100vh' }}>
         <div className="dashboard-item" style={{ maxWidth: '400px', width: '100%', textAlign: 'center', margin: '2rem' }}>
           <img src="/solmedieval1.png" alt="Sol" style={{ width: '80px', marginBottom: '1rem', borderRadius: '12px' }} />
           <h1 className="header-title" style={{ marginBottom: '1.5rem', fontSize: '2.5rem', fontFamily: 'CloisterBlack, serif' }}>
@@ -247,7 +249,7 @@ export default function App() {
           />
         )}
         
-        {currentScreen === "study" && activeText && studyChunks.length > 0 && (
+        {currentScreen === "study" && activeText && (
           <StudyFlow 
             textItem={activeText} 
             targetChunks={studyChunks} 

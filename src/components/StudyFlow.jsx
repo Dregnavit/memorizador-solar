@@ -1,105 +1,77 @@
-import { useState, useEffect } from "react";
+import React, { useState } from "react";
 
-export default function StudyFlow({ textItem, targetChunks, onDone, onBack }) {
-  const [chunkIndex, setChunkIndex] = useState(0);
-  const [phase, setPhase] = useState("analitica");
-  const [icaroForm, setIcaroForm] = useState({ keyword: "", imagen: "", palacio: "" });
-  const [sessionResults, setSessionResults] = useState([]);
+export default function StudyFlow({ 
+  textItem = {}, 
+  targetChunks = [], 
+  onDone = () => {}, 
+  onBack = () => {} 
+}) {
+  const chunks = Array.isArray(targetChunks) && targetChunks.length > 0 
+    ? targetChunks 
+    : (Array.isArray(textItem?.chunks) ? textItem.chunks : []);
 
-  const currentChunk = targetChunks[chunkIndex];
+  const [currentIndex, setCurrentIndex] = useState(0);
+  const [showAnswer, setShowAnswer] = useState(false);
+  const [results, setResults] = useState([]);
 
-  // Si el fragmento ya tenía Método Ícaro guardado en Firebase, lo cargamos
-  useEffect(() => {
-    if (currentChunk) {
-      setIcaroForm({
-        keyword: currentChunk.icaro?.keyword || "",
-        imagen: currentChunk.icaro?.imagen || "",
-        palacio: currentChunk.icaro?.palacio || ""
-      });
-      setPhase("analitica");
-    }
-  }, [currentChunk]);
+  if (chunks.length === 0) {
+    return (
+      <div style={{ textAlign: "center", padding: "2rem" }}>
+        <p>No hay fragmentos disponibles para estudiar.</p>
+        <button onClick={onBack}>Volver</button>
+      </div>
+    );
+  }
 
-  const advancePhase = () => {
-    if (phase === "analitica") setPhase("visual");
-    else if (phase === "visual") setPhase("espacial");
-    else if (phase === "espacial") setPhase("evaluacion");
-  };
+  const currentChunk = chunks[currentIndex];
 
-  const finishChunk = (rating) => {
-    const newResults = [...sessionResults, { 
-      chunkId: currentChunk.id, 
-      rating, 
-      icaro: icaroForm 
-    }];
+  const handleRating = (rating) => {
+    const updatedResults = [...results, { chunkId: currentChunk.id, rating }];
+    setResults(updatedResults);
+    setShowAnswer(false);
 
-    if (chunkIndex + 1 < targetChunks.length) {
-      setSessionResults(newResults);
-      setChunkIndex(chunkIndex + 1);
+    if (currentIndex + 1 < chunks.length) {
+      setCurrentIndex(currentIndex + 1);
     } else {
-      // Envía todos los datos a App.jsx para que haga el push a Firebase
-      onDone(newResults); 
+      onDone(updatedResults);
     }
   };
 
   return (
-    <div className="screen study-panel">
-      <div className="top-nav">
-        <h2>{textItem?.title || "Memorización"} - Ícaro</h2>
-        <button className="icon-btn" onClick={onBack}>✕</button>
-      </div>
+    <div style={{ maxWidth: "700px", margin: "0 auto", padding: "1rem" }}>
+      <button 
+        onClick={onBack} 
+        style={{ background: "transparent", border: "1px solid var(--text-muted)", padding: "0.4rem 0.8rem", cursor: "pointer", marginBottom: "1rem" }}
+      >
+        ← Salir del Estudio
+      </button>
 
-      <div className="step-dots">
-        {["analitica", "visual", "espacial", "evaluacion"].map((p) => (
-          <div key={p} className={`step-dot ${phase === p ? "is-active" : ""}`} />
-        ))}
-      </div>
+      <div className="dashboard-item" style={{ padding: "2rem", textAlign: "center", minHeight: "220px", display: "flex", flexDirection: "column", justifyContent: "center" }}>
+        <p style={{ fontSize: "0.85rem", opacity: 0.7, marginBottom: "1rem" }}>
+          Fragmento {currentIndex + 1} de {chunks.length}
+        </p>
 
-      <div className="study-text">{currentChunk?.text}</div>
+        <h2 style={{ fontSize: "1.6rem", marginBottom: "1.5rem" }}>
+          {currentChunk?.text || "Sin texto"}
+        </h2>
 
-      {phase === "analitica" && (
-        <div className="form-panel">
-          <label className="field-label">Fase 1: Palabra Clave / Idea Maestra</label>
-          <input type="text" className="text-input" placeholder="Ej: Revolución, 1984, Mitocondria..." 
-            value={icaroForm.keyword} onChange={e => setIcaroForm({...icaroForm, keyword: e.target.value})} />
-          <button className="btn btn-primary" onClick={advancePhase} disabled={!icaroForm.keyword}>Destilar Idea</button>
-        </div>
-      )}
-
-      {phase === "visual" && (
-        <div className="form-panel">
-          <label className="field-label">Fase 2: Forjado de Imagen (Agente Visual)</label>
-          <textarea className="text-area-lg" placeholder="Describe una imagen absurda, exagerada o en movimiento..." 
-            value={icaroForm.imagen} onChange={e => setIcaroForm({...icaroForm, imagen: e.target.value})} />
-          <button className="btn btn-primary" onClick={advancePhase} disabled={!icaroForm.imagen}>Fijar Imagen</button>
-        </div>
-      )}
-
-      {phase === "espacial" && (
-        <div className="form-panel">
-          <label className="field-label">Fase 3: Estación Espacial (Loci)</label>
-          <input type="text" className="text-input" placeholder="Ej: La puerta de mi casa, el escritorio..." 
-            value={icaroForm.palacio} onChange={e => setIcaroForm({...icaroForm, palacio: e.target.value})} />
-          <button className="btn btn-primary" onClick={advancePhase} disabled={!icaroForm.palacio}>Anclar en el Espacio</button>
-        </div>
-      )}
-
-      {phase === "evaluacion" && (
-        <div className="form-panel">
-          <label className="field-label">Fase 4: Recuperación Activa</label>
-          <div className="reorder-answer" style={{ flexDirection: "column", alignItems: "flex-start" }}>
-            <span className="chunk-preview">💡 Pista Visual: {icaroForm.imagen}</span>
-            <span className="chunk-preview">📍 Estación: {icaroForm.palacio}</span>
+        {!showAnswer ? (
+          <button 
+            className="btn-primary" 
+            onClick={() => setShowAnswer(true)}
+            style={{ padding: "0.6rem 1.2rem", fontSize: "1rem", margin: "0 auto", cursor: "pointer" }}
+          >
+            Revelar / Memorizar
+          </button>
+        ) : (
+          <div style={{ marginTop: "1.5rem", display: "flex", gap: "0.5rem", justifyContent: "center", flexWrap: "wrap" }}>
+            <button onClick={() => handleRating("again")} style={{ padding: "0.5rem 1rem", cursor: "pointer" }}>Repetir</button>
+            <button onClick={() => handleRating("hard")} style={{ padding: "0.5rem 1rem", cursor: "pointer" }}>Difícil</button>
+            <button onClick={() => handleRating("good")} style={{ padding: "0.5rem 1rem", cursor: "pointer" }}>Bueno</button>
+            <button onClick={() => handleRating("easy")} className="btn-primary" style={{ padding: "0.5rem 1rem", cursor: "pointer" }}>Fácil</button>
           </div>
-          <p className="detail-sub" style={{ marginTop: "16px" }}>¿Qué tan nítida fue la recuperación usando tus anclajes?</p>
-          <div className="rate-buttons">
-            <button className="btn rate-btn rate-again" onClick={() => finishChunk("again")}>Olvidé</button>
-            <button className="btn rate-btn rate-hard" onClick={() => finishChunk("hard")}>Difícil</button>
-            <button className="btn rate-btn rate-good" onClick={() => finishChunk("good")}>Bien</button>
-            <button className="btn rate-btn rate-easy" onClick={() => finishChunk("easy")}>Fácil</button>
-          </div>
-        </div>
-      )}
+        )}
+      </div>
     </div>
   );
 }

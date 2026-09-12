@@ -1,13 +1,19 @@
 import React from "react";
 
-export default function TextDetailScreen({ textItem, progressMap, onBack, onStudy, onExam }) {
-  const title = textItem.title || "Texto sin título";
-  const rawText = textItem.rawText || "";
-  const chunks = textItem.chunks || [];
+export default function TextDetailScreen({ 
+  textItem = {}, 
+  progressMap = {}, 
+  onBack = () => {}, 
+  onStudy = () => {}, 
+  onExam = () => {} 
+}) {
+  const title = textItem?.title || "Texto sin título";
+  const rawText = textItem?.rawText || "";
+  const chunks = Array.isArray(textItem?.chunks) ? textItem.chunks : [];
 
   const dueCount = chunks.filter(c => {
     const p = progressMap[c.id];
-    return !p || p.nextReview <= Date.now();
+    return !p || (p.nextReview || 0) <= Date.now();
   }).length;
 
   return (
@@ -62,7 +68,7 @@ export default function TextDetailScreen({ textItem, progressMap, onBack, onStud
       <div style={{ display: "flex", flexDirection: "column", gap: "0.8rem" }}>
         {chunks.map((chunk, index) => {
           const prog = progressMap[chunk.id];
-          const isDue = !prog || prog.nextReview <= Date.now();
+          const isDue = !prog || (prog.nextReview || 0) <= Date.now();
           return (
             <div 
               key={chunk.id || index} 
