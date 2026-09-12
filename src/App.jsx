@@ -6,7 +6,7 @@ import {
   createUserWithEmailAndPassword, 
   signOut 
 } from "firebase/auth";
-import { collection, query, onSnapshot, addDoc, serverTimestamp } from "firebase/firestore";
+import { collection, query, onSnapshot, addDoc, doc, writeBatch, serverTimestamp } from "firebase/firestore";
 
 import Dashboard from "./components/Dashboard";
 import TextDetailScreen from "./components/TextDetailScreen";
@@ -20,18 +20,20 @@ export default function App() {
   const [progressMap, setProgressMap] = useState({});
   const [activeText, setActiveText] = useState(null);
   const [currentScreen, setCurrentScreen] = useState("dashboard");
+  const [studyChunks, setStudyChunks] = useState([]);
   
-  // Estados para tu sistema de acceso por correo
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [isLogin, setIsLogin] = useState(true);
   const [authError, setAuthError] = useState("");
 
+  // 1. Autenticación
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => setUser(currentUser));
     return () => unsubscribe();
   }, []);
 
+  // 2. Carga de Textos
   useEffect(() => {
     if (!user) return;
     const q = query(collection(db, "texts")); 
@@ -40,8 +42,15 @@ export default function App() {
       (snapshot) => {
         const texts = [];
         snapshot.forEach((document) => {
-          if (document.data().userId === user.uid || !document.data().userId) {
-            texts.push({ id: document.id, ...document.data() });
+          const data = document.data();
+          if (data.userId === user.uid || !data.userId) {
+            // Se asegura de que title y chunks siempre existan para evitar crasheos
+            texts.push({ 
+              id: document.id, 
+              title: data.title || "Texto sin título",
+              chunks: data.chunks || [],
+              ...data 
+            });
           }
         });
         setTextsData(texts);
@@ -50,6 +59,18 @@ export default function App() {
     );
     return () => unsubscribe();
   }, [user]);
+
+  // 3. Carga de Progreso (solo cuando hay un texto activo)
+  useEffect(() => {
+    if (!user || !activeText) return;
+    const q = query(collection(db, `texts/${activeText.id}/progress`));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const pMap = {};
+      snapshot.forEach((document) => { pMap[document.id] = document.data(); });
+      setProgressMap(pMap);
+    });
+    return () => unsubscribe();
+  }, [user, activeText]);
 
   const handleAuth = async (e) => {
     e.preventDefault();
@@ -69,55 +90,77 @@ export default function App() {
 
   const handleAddText = async (newTextObj) => {
     if (!user) return;
-    await addDoc(collection(db, "texts"), {
+    // Si el componente Dashboard no genera chunks, le forzamos un arreglo vacío
+    const safeTextObj = {
       ...newTextObj,
+      chunks: newTextObj.chunks || [],
       userId: user.uid,
       createdAt: serverTimestamp()
-    });
+    };
+    await addDoc(collection(db, "texts"), safeTextObj);
   };
 
-  // PANTALLA DE INICIO DE SESIÓN RESTAURADA
+  // 4. Lógica de Estudio Restaurada y Blindada
+  const startStudy = (mode) => {
+    // Si el texto es viejo y no tiene fragmentos, evita el colapso y frena la ejecución
+    const chunks = activeText?.chunks || [];
+    if (chunks.length === 0) {
+      alert("Este texto no tiene fragmentos compatibles con el nuevo método.");
+      return;
+    }
+    
+    let targets = mode === "all" 
+      ? chunks 
+      : chunks.filter(c => !progressMap[c.id] || progressMap[c.id].nextReview <= Date.now());
+    
+    setStudyChunks(targets);
+    setCurrentScreen("study");
+  };
+
+  const handleStudyDone = async (results) => {
+    const updatedProgress = { ...progressMap };
+    const batch = writeBatch(db);
+
+    for (const res of results) {
+      const { chunkId, rating, icaro } = res;
+      const current = updatedProgress[chunkId] || { interval: 0, ease: 2.5, nextReview: Date.now() };
+      let { interval, ease } = current;
+
+      if (rating === "again") { interval = 0; ease = Math.max(1.3, ease - 0.2); } 
+      else if (rating === "hard") { interval = Math.max(1, interval * 1.2); ease = Math.max(1.3, ease - 0.15); } 
+      else if (rating === "good") { interval = interval === 0 ? 1 : interval * 2.5; } 
+      else if (rating === "easy") { interval = interval === 0 ? 4 : interval * ease * 1.3; ease += 0.15; }
+
+      const nextReview = Date.now() + interval * 24 * 60 * 60 * 1000;
+      const newProgressData = { interval, ease, nextReview, icaro };
+
+      updatedProgress[chunkId] = newProgressData;
+      const chunkRef = doc(db, `texts/${activeText.id}/progress/${chunkId}`);
+      batch.set(chunkRef, newProgressData, { merge: true });
+    }
+
+    await batch.commit();
+    setProgressMap(updatedProgress);
+    setCurrentScreen("detail");
+  };
+
   if (!user) {
     return (
       <div className="app-root theme-medieval" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
         <div className="dashboard-item" style={{ maxWidth: '400px', width: '100%', textAlign: 'center', margin: '2rem' }}>
           <img src="/solmedieval1.png" alt="Sol" style={{ width: '80px', marginBottom: '1rem', borderRadius: '12px' }} />
-          
-          {/* Se añade la clase header-title para que CSS no lo oculte y aplique CloisterBlack */}
-          <h1 className="header-title" style={{ marginBottom: '1.5rem', fontSize: '2.5rem' }}>
-            Memorizador Solar
-          </h1>
+          <h1 className="header-title" style={{ marginBottom: '1.5rem', fontSize: '2.5rem' }}>Memorizador Solar</h1>
           
           <form onSubmit={handleAuth} style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-            <input 
-              type="email" 
-              placeholder="Correo electrónico" 
-              value={email} 
-              onChange={(e) => setEmail(e.target.value)} 
-              required 
-              style={{ marginBottom: '0' }}
-            />
-            <input 
-              type="password" 
-              placeholder="Contraseña" 
-              value={password} 
-              onChange={(e) => setPassword(e.target.value)} 
-              required 
-              style={{ marginBottom: '10px' }}
-            />
-            {authError && <p style={{ color: 'var(--accent)', fontSize: '0.9rem', margin: '0 0 10px 0' }}>{authError}</p>}
-            
-            <button type="submit" style={{ width: '100%' }}>
-              {isLogin ? "Entrar" : "Crear Cuenta"}
-            </button>
+            <input type="email" placeholder="Correo electrónico" value={email} onChange={(e) => setEmail(e.target.value)} required />
+            <input type="password" placeholder="Contraseña" value={password} onChange={(e) => setPassword(e.target.value)} required />
+            {authError && <p style={{ color: 'var(--accent)', fontSize: '0.9rem' }}>{authError}</p>}
+            <button type="submit" style={{ width: '100%' }}>{isLogin ? "Entrar" : "Crear Cuenta"}</button>
           </form>
 
           <p style={{ marginTop: '1.5rem', fontSize: '0.9rem', color: 'var(--text-muted)' }}>
             {isLogin ? "¿No tienes cuenta? " : "¿Ya tienes cuenta? "}
-            <span 
-              onClick={() => { setIsLogin(!isLogin); setAuthError(""); }} 
-              style={{ color: 'var(--accent)', cursor: 'pointer', fontWeight: 'bold', textDecoration: 'underline' }}
-            >
+            <span onClick={() => { setIsLogin(!isLogin); setAuthError(""); }} style={{ color: 'var(--accent)', cursor: 'pointer', fontWeight: 'bold' }}>
               {isLogin ? "Regístrate aquí" : "Inicia sesión"}
             </span>
           </p>
@@ -165,6 +208,17 @@ export default function App() {
             textItem={activeText} 
             progressMap={progressMap} 
             onBack={() => { setActiveText(null); setCurrentScreen("dashboard"); }} 
+            onStudy={() => startStudy("all")} 
+            onExam={() => startStudy("due")} 
+          />
+        )}
+        
+        {currentScreen === "study" && activeText && studyChunks.length > 0 && (
+          <StudyFlow 
+            textItem={activeText} 
+            targetChunks={studyChunks} 
+            onDone={handleStudyDone} 
+            onBack={() => setCurrentScreen("detail")} 
           />
         )}
       </div>
